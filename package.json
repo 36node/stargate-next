@@ -1,0 +1,58 @@
+{
+  "name": "stargate-next-monorepo",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "turbo build",
+    "build:ci": "turbo build:ci",
+    "dev": "turbo dev --filter=playground --filter=stargate-next",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "analyze": "turbo analyze",
+    "translate": "turbo translate",
+    "boundaries": "turbo boundaries",
+    "bump-deps": "npx npm-check-updates --deep -u -x recharts && pnpm install",
+    "bump-ui": "npx shadcn@latest add --all --overwrite -c packages/ui",
+    "clean": "git clean -xdf node_modules",
+    "db:push": "pnpm --filter @repo/db push",
+    "db:push:force": "pnpm --filter @repo/db push:force",
+    "db:migrate": "pnpm --filter @repo/db migrate:deploy",
+    "db:studio": "pnpm --filter @repo/db studio",
+    "storybook": "pnpm -C packages/ui storybook",
+    "postinstall": "scripts/setup-env.sh",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.8",
+    "@repo/typescript-config": "workspace:*",
+    "@turbo/gen": "^2.9.16",
+    "@types/node": "^24.12.2",
+    "dotenv": "^16.6.1",
+    "husky": "^9.1.7",
+    "tsup": "^8.5.1",
+    "turbo": "^2.9.16",
+    "typescript": "^5.9.3",
+    "ultracite": "6.3.9",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "pnpm@10.28.1",
+  "pnpm": {
+    "overrides": {
+      "parse5": "^7.2.1",
+      "webpack": "^5.108.3"
+    },
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "bufferutil",
+      "core-js-pure",
+      "esbuild",
+      "prisma",
+      "sharp"
+    ]
+  },
+  "type": "module"
+}

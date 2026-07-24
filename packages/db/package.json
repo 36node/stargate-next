@@ -1,0 +1,44 @@
+{
+  "name": "@repo/db",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "analyze": "prisma generate",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && tsup index.ts --format cjs --dts --clean",
+    "build:ci": "prisma generate && tsup index.ts --format cjs --dts --clean",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "push": "prisma db push",
+    "push:force": "prisma db push --force-reset && prisma generate",
+    "migrate:push": "prisma db push",
+    "migrate:push:force": "prisma db push --force-reset",
+    "migrate:deploy": "prisma db push",
+    "prisma": "prisma",
+    "studio": "prisma studio",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.3.0",
+    "@prisma/client": "7.3.0",
+    "dotenv": "^16.4.0",
+    "pg": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "24.10.1",
+    "@types/pg": "^8.18.0",
+    "prisma": "7.3.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}

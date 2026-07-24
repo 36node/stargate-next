@@ -1,0 +1,277 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main, "milestone/*", "release/*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CYCLOPS_BASE_URL: ${{ secrets.CYCLOPS_BASE_URL }}
+  HARBOR_DOMAIN: harbor.36node.com
+  HARBOR_PROJECT: 36node
+  IMAGE_REBUILD_TTL_DAYS: "7"
+  IMAGE_REBUILD_BRANCHES: "main,milestone/*,release/*"
+
+jobs:
+  test:
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_DB: stargate-next-test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d stargate-next-test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Push database schema
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+      - name: Code check
+        run: pnpm check
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+
+  docker:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 30
+    outputs:
+      stargate_next_image_tag: input-${{ steps.image-fingerprints.outputs.stargate_next_sha }}
+      playground_image_tag: input-${{ steps.image-fingerprints.outputs.playground_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build:ci --summarize
+        env:
+          NODE_ENV: production
+          BUILD_STANDALONE: "true"
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.HARBOR_DOMAIN }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+      - name: Docker metadata for Stargate Next
+        id: meta-stargate-next
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+      - name: Docker metadata for Playground
+        id: meta-playground
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next-playground
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+      - name: Compute image fingerprints
+        id: image-fingerprints
+        run: bash scripts/docker-image-fingerprint.sh >> "$GITHUB_OUTPUT"
+      - name: Plan image builds
+        id: image-plan
+        env:
+          STARGATE_NEXT_SHA: ${{ steps.image-fingerprints.outputs.stargate_next_sha }}
+          PLAYGROUND_SHA: ${{ steps.image-fingerprints.outputs.playground_sha }}
+          STARGATE_NEXT_META_TAGS: ${{ steps.meta-stargate-next.outputs.tags }}
+          PLAYGROUND_META_TAGS: ${{ steps.meta-playground.outputs.tags }}
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          plan_image() {
+            local bake_target="$1"
+            local image_target="$2"
+            local sha="$3"
+            local meta_tags="$4"
+            local output="$5"
+            local image="${HARBOR_DOMAIN}/${HARBOR_PROJECT}/${image_target}"
+            local fingerprint_tag="${image}:input-${sha}"
+            local tags="${meta_tags}"$'\n'"${fingerprint_tag}"
+            echo "${output}_tags<<EOF" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$tags" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            if docker buildx imagetools inspect "$fingerprint_tag" >/dev/null 2>&1; then
+              while IFS= read -r tag; do
+                [ -z "$tag" ] || docker buildx imagetools create -t "$tag" "$fingerprint_tag"
+              done <<< "$meta_tags"
+              echo "${output}_status=retagged" >> "$GITHUB_OUTPUT"
+            else
+              echo "${output}_status=built" >> "$GITHUB_OUTPUT"
+              targets+=("$bake_target")
+            fi
+          }
+          targets=()
+          plan_image "stargate-next" "stargate-next" "$STARGATE_NEXT_SHA" "$STARGATE_NEXT_META_TAGS" "stargate_next"
+          plan_image "playground" "stargate-next-playground" "$PLAYGROUND_SHA" "$PLAYGROUND_META_TAGS" "playground"
+          echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
+      - name: Build and push cache misses
+        if: steps.image-plan.outputs.bake_targets != ''
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-bake.hcl
+          push: true
+          targets: ${{ steps.image-plan.outputs.bake_targets }}
+        env:
+          STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
+          PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
+      - name: Build summary
+        if: always()
+        run: |
+          {
+            echo "## Image build results"
+            echo
+            echo "| Application | Status | Image |"
+            echo "| --- | --- | --- |"
+            echo "| Stargate Next | \`${{ steps.image-plan.outputs.stargate_next_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next:${{ steps.meta-stargate-next.outputs.version }}\` |"
+            echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next-playground:${{ steps.meta-playground.outputs.version }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: [test, docker]
+    if: ${{ github.actor != 'dependabot[bot]' && needs.test.result == 'success' && needs.docker.result == 'success' }}
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 30
+    outputs:
+      deploy_name: ${{ steps.deploy-name.outputs.deploy_name }}
+      stargate_next_url: ${{ steps.urls.outputs.stargate_next_url }}
+      playground_url: ${{ steps.urls.outputs.playground_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Extract environment overrides
+        id: pr-env
+        uses: ./.github/actions/pr-env
+        with:
+          text: "${{ github.event.pull_request.body }}"
+      - name: Resolve deployment name
+        id: deploy-name
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            deploy_name="pr-${{ github.event.pull_request.number }}"
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            deploy_name="uat"
+          else
+            deploy_name="$(echo "${{ github.ref_name }}" | tr '/' '-')"
+          fi
+          echo "deploy_name=$deploy_name" >> "$GITHUB_OUTPUT"
+      - name: Upsert application settings
+        env:
+          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
+          PR_ENV_JSON: ${{ steps.pr-env.outputs.env || '{}' }}
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sed -e "s/{{deploy}}/${DEPLOY_NAME}/g" \
+              -e "s/{{deploy *| *uppercase}}/$(echo "$DEPLOY_NAME" | tr '[:lower:]' '[:upper:]')/g" \
+            .github/workflows/stargate-next-app-settings.json >/tmp/app-settings.json
+          jq --argjson envs "$PR_ENV_JSON" \
+            '.playbook.extraVars += ($envs | with_entries(.value = {default: .value, overridable: true}))' \
+            /tmp/app-settings.json >/tmp/app-settings.final.json
+          curl --fail-with-body -X PUT \
+            "$CYCLOPS_BASE_URL/api/settings/applications/stargate-next-${DEPLOY_NAME}" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/app-settings.final.json
+      - name: Deploy stage
+        env:
+          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
+          STARGATE_NEXT_TAG: ${{ needs.docker.outputs.stargate_next_image_tag }}
+          PLAYGROUND_TAG: ${{ needs.docker.outputs.playground_image_tag }}
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          app_id="stargate-next-${DEPLOY_NAME}"
+          token="$(curl --fail-with-body \
+            "$CYCLOPS_BASE_URL/api/settings/applications/${app_id}/hooks" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN" | jq -r '.token')"
+          jq -n --arg stargate "$STARGATE_NEXT_TAG" --arg playground "$PLAYGROUND_TAG" \
+            '{overrides: {stargate_next_tag: $stargate, stargate_next_playground_tag: $playground}}' \
+            >/tmp/deploy-overrides.json
+          curl --fail-with-body -X POST "$CYCLOPS_BASE_URL/api/hooks/${token}/deploy" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/deploy-overrides.json
+      - name: Build deployment URLs
+        id: urls
+        env:
+          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
+        run: |
+          echo "stargate_next_url=http://stargate-next.stargate-next-${DEPLOY_NAME}.36node.com" >> "$GITHUB_OUTPUT"
+          echo "playground_url=http://playground.stargate-next-${DEPLOY_NAME}.36node.com" >> "$GITHUB_OUTPUT"
+
+  notify:
+    needs: [test, docker, deploy]
+    if: ${{ always() && github.actor != 'dependabot[bot]' && needs.test.result != 'cancelled' && needs.deploy.result != 'cancelled' }}
+    runs-on: arc-runners-haivivi
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build notification content
+        id: notify
+        uses: ./.github/actions/ci-notify-content
+        with:
+          build_result: ${{ (needs.test.result == 'success' && needs.docker.result == 'success') && 'success' || 'failure' }}
+          deploy_result: ${{ needs.deploy.result }}
+          deploy_urls: >-
+            [{"name":"Stargate Next","url":"${{ needs.deploy.outputs.stargate_next_url }}"},{"name":"Playground","url":"${{ needs.deploy.outputs.playground_url }}"}]
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Send UAT notification
+        if: ${{ github.event_name == 'push' }}
+        uses: ./.github/actions/feishu-send
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          chat_id: ${{ secrets.FEISHU_CHAT_ID }}
+          msg_type: text
+          content: ${{ steps.notify.outputs.content }}
+      - name: Comment pull request
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          message: ${{ steps.notify.outputs.content }}
+          comment-tag: deploy-urls

@@ -1,0 +1,73 @@
+name: 'CI Notify Content'
+description: '根据各阶段结果和部署地址，生成统一的通知内容'
+
+inputs:
+  build_result:
+    description: 'test-and-build job 的结果 (success/failure/skipped)'
+    required: true
+  deploy_result:
+    description: 'deploy job 的结果 (success/failure/skipped)'
+    required: true
+  deploy_urls:
+    description: |
+      部署地址列表（JSON 数组），例如:
+        [{"name":"Admin","url":"http://admin.example.com"},{"name":"WWW","url":"http://www.example.com"}]
+    required: false
+    default: '[]'
+  run_url:
+    description: 'GitHub Actions run URL'
+    required: true
+
+outputs:
+  overall:
+    description: '总体状态 (success/failure)'
+    value: ${{ steps.build.outputs.overall }}
+  content:
+    description: '通知内容文本'
+    value: ${{ steps.build.outputs.content }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Build notification content
+      id: build
+      shell: bash
+      env:
+        BUILD_RESULT: ${{ inputs.build_result }}
+        DEPLOY_RESULT: ${{ inputs.deploy_result }}
+        DEPLOY_URLS: ${{ inputs.deploy_urls }}
+        RUN_URL: ${{ inputs.run_url }}
+      run: |
+        icon_for() {
+          case "$1" in
+            success) printf "✅" ;;
+            failure) printf "❌" ;;
+            *) printf "⏭️" ;;
+          esac
+        }
+
+        if [ "$BUILD_RESULT" = "success" ] && [ "$DEPLOY_RESULT" = "success" ]; then
+          OVERALL="success"
+        else
+          OVERALL="failure"
+        fi
+        echo "overall=$OVERALL" >> $GITHUB_OUTPUT
+
+        STATUS_LINE="构建 $(icon_for "$BUILD_RESULT") | 部署 $(icon_for "$DEPLOY_RESULT")"
+
+        URL_COUNT=$(echo "$DEPLOY_URLS" | jq 'length')
+
+        {
+          echo "content<<EOF"
+          echo "$STATUS_LINE"
+          if [ "$OVERALL" = "success" ] && [ "$URL_COUNT" -gt 0 ]; then
+            echo ""
+            echo "📍 访问地址:"
+            echo "$DEPLOY_URLS" | jq -r '.[] | "- \(.name): \(.url)"'
+          fi
+          if [ "$OVERALL" != "success" ]; then
+            echo ""
+            echo "🔗 详情: $RUN_URL"
+          fi
+          echo "EOF"
+        } >> $GITHUB_OUTPUT

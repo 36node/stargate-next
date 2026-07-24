@@ -1,0 +1,85 @@
+name: 'Feishu Send Message'
+description: '发送消息到飞书群聊（创建话题）'
+
+inputs:
+  app_id:
+    description: '飞书应用 App ID'
+    required: true
+  app_secret:
+    description: '飞书应用 App Secret'
+    required: true
+  chat_id:
+    description: '飞书群聊 ID'
+    required: true
+  msg_type:
+    description: '消息类型: text, post'
+    required: false
+    default: 'text'
+  content:
+    description: '消息内容（text 类型直接传文本，post 类型传 JSON）'
+    required: true
+
+outputs:
+  message_id:
+    description: '发送成功后的消息 ID，用于后续回复'
+    value: ${{ steps.send.outputs.message_id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Get Feishu token
+      id: token
+      shell: bash
+      env:
+        APP_ID: ${{ inputs.app_id }}
+        APP_SECRET: ${{ inputs.app_secret }}
+      run: |
+        RESPONSE=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
+          -H 'Content-Type: application/json' \
+          -d "{\"app_id\": \"${APP_ID}\", \"app_secret\": \"${APP_SECRET}\"}")
+
+        TOKEN=$(echo "$RESPONSE" | jq -r '.tenant_access_token')
+        if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
+          echo "::error::Failed to get Feishu token: $RESPONSE"
+          exit 1
+        fi
+        echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+    - name: Send message
+      id: send
+      shell: bash
+      env:
+        FEISHU_TOKEN: ${{ steps.token.outputs.token }}
+        CHAT_ID: ${{ inputs.chat_id }}
+        MSG_TYPE: ${{ inputs.msg_type }}
+        CONTENT: ${{ inputs.content }}
+      run: |
+        if [ "$MSG_TYPE" = "text" ]; then
+          MSG_CONTENT=$(jq -n --arg text "$CONTENT" '{"text": $text}')
+        else
+          MSG_CONTENT="$CONTENT"
+        fi
+
+        REQUEST_BODY=$(jq -n \
+          --arg receive_id "$CHAT_ID" \
+          --arg msg_type "$MSG_TYPE" \
+          --arg content "$MSG_CONTENT" \
+          '{
+            "receive_id": $receive_id,
+            "msg_type": $msg_type,
+            "content": $content
+          }')
+
+        RESPONSE=$(curl -s -X POST 'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id' \
+          -H "Authorization: Bearer $FEISHU_TOKEN" \
+          -H 'Content-Type: application/json' \
+          -d "$REQUEST_BODY")
+
+        MESSAGE_ID=$(echo "$RESPONSE" | jq -r '.data.message_id')
+        if [ "$MESSAGE_ID" = "null" ] || [ -z "$MESSAGE_ID" ]; then
+          echo "::error::Failed to send Feishu message: $RESPONSE"
+          exit 1
+        fi
+
+        echo "message_id=$MESSAGE_ID" >> $GITHUB_OUTPUT
+        echo "Sent message with ID: $MESSAGE_ID"

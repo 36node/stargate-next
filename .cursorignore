@@ -1,0 +1,21 @@
+# 环境变量文件
+.env
+.env.*
+.env.local
+.env.*.local
+
+# 密钥和证书
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 凭证文件
+credentials.json
+secrets.yaml
+secrets.yml
+**/secrets/**
+
+# 其他敏感文件
+# .npmrc
+# .yarnrc

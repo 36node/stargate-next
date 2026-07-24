@@ -1,0 +1,45 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { IntersectionType } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsDate, IsNotEmpty, IsString } from 'class-validator';
+import { Document } from 'mongoose';
+
+import * as config from 'src/config';
+import { SortFields } from 'src/lib/sort';
+import { helper, MongoEntity } from 'src/mongo';
+
+@Schema()
+@SortFields(['expireAt'])
+export class CaptchaDoc {
+  /**
+   * 验证码
+   */
+  @IsNotEmpty()
+  @IsString()
+  @Prop()
+  code: string;
+
+  /**
+   * 过期时间
+   */
+  @IsNotEmpty()
+  @Type(() => Date)
+  @IsDate()
+  @Prop({ default: () => Date.now() + config.captcha.expiresInS * 1000 })
+  expireAt: Date;
+
+  /**
+   * key
+   */
+  @IsNotEmpty()
+  @IsString()
+  @Prop()
+  key: string;
+}
+
+export const CaptchaSchema = helper(SchemaFactory.createForClass(CaptchaDoc));
+export class Captcha extends IntersectionType(CaptchaDoc, MongoEntity) {}
+export type CaptchaDocument = Captcha & Document;
+
+CaptchaSchema.index({ key: 1 }, { unique: true });
+CaptchaSchema.index({ expireAt: 1 }, { expireAfterSeconds: 7 * 24 * 3600 });

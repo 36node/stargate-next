@@ -1,0 +1,233 @@
+import { faker } from '@faker-js/faker';
+import { getModelToken } from '@nestjs/mongoose';
+import { Test, TestingModule } from '@nestjs/testing';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import { connect, Connection, Model } from 'mongoose';
+import { nanoid } from 'nanoid';
+
+import { ErrorCodes } from 'src/constants';
+
+import { User, UserSchema } from './entities/user.entity';
+import { UserService } from './user.service';
+
+const mockUser = () => ({
+  email: faker.internet.email(),
+  password: '123456',
+  username: faker.internet.userName(),
+  ns: 'n1',
+});
+
+describe('UserService', () => {
+  let mongod: MongoMemoryServer;
+  let mongoConnection: Connection;
+  let userService: UserService;
+  let userModel: Model<User>;
+
+  beforeAll(async () => {
+    mongod = await MongoMemoryServer.create();
+    const uri = mongod.getUri();
+    mongoConnection = (await connect(uri)).connection;
+    userModel = mongoConnection.model<User>(User.name, UserSchema);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        UserService,
+        {
+          provide: getModelToken(User.name),
+          useValue: userModel,
+        },
+      ],
+    }).compile();
+
+    userService = module.get<UserService>(UserService);
+    await userModel.syncIndexes();
+  });
+
+  afterAll(async () => {
+    await mongoConnection.close();
+    await mongod.stop();
+  });
+
+  afterEach(async () => {
+    const collections = mongoConnection.collections;
+    for (const key in collections) {
+      const collection = collections[key];
+      await collection.deleteMany({});
+    }
+  });
+
+  describe('createUser', () => {
+    it('should create a user', async () => {
+      const userDoc = mockUser();
+      const before = Date.now();
+      const user = await userService.create(userDoc);
+      expect(user).toBeDefined();
+      expect(typeof user.id).toBe('string');
+      expect(userService.checkPassword(user.password, userDoc.password)).toBeTruthy();
+      expect(user.passwordChangedAt).toBeInstanceOf(Date);
+      expect(user.passwordChangedAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('should keep an explicit id when provided', async () => {
+      const userDoc = { ...mockUser(), id: `import-${nanoid(10)}` };
+      const user = await userService.create(userDoc);
+      expect(user.id).toBe(userDoc.id);
+    });
+
+    it('should validate index', async () => {
+      await expect(userService.create({ username: 'kitty' })).resolves.toBeDefined();
+      await expect(userService.create({ username: 'kitty' })).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ErrorCodes.USER_ALREADY_EXISTS }),
+      });
+      await expect(userService.create({ phone: '18888888888' })).resolves.toBeDefined();
+      await expect(userService.create({ phone: '18888888888' })).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ErrorCodes.PHONE_ALREADY_EXISTS }),
+      });
+      await expect(userService.create({ email: 'aaa@test.com' })).resolves.toBeDefined();
+      await expect(userService.create({ email: 'aaa@test.com' })).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ErrorCodes.EMAIL_ALREADY_EXISTS }),
+      });
+    });
+
+    it('should map explicit id conflicts to the user exists error', async () => {
+      const userDoc = { ...mockUser(), id: `import-${nanoid(10)}` };
+      await userService.create(userDoc);
+
+      await expect(userService.create(userDoc)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ErrorCodes.USER_ALREADY_EXISTS }),
+      });
+    });
+  });
+
+  describe('findByLogin', () => {
+    it('should find a user by username', async () => {
+      const userDoc = mockUser();
+      const user = await userService.create(userDoc);
+      const found = await userService.findByLogin(user.username);
+      expect(found).toBeDefined();
+
+      const { password, ...rest } = userDoc;
+      expect(found).toMatchObject(rest);
+      expect(userService.checkPassword(found.password, password)).toBeTruthy();
+    });
+
+    it('should find a user by phone', async () => {
+      const phone = '15158033280';
+      const userDoc = { ...mockUser(), phone };
+      const user = await userService.create(userDoc);
+      const found = await userService.findByLogin(phone);
+      expect(found?.id).toBe(user.id);
+    });
+
+    it('should find a user by email', async () => {
+      const userDoc = mockUser();
+      const user = await userService.create(userDoc);
+      const found = await userService.findByLogin(user.email);
+      expect(found?.id).toBe(user.id);
+    });
+
+    it('should not fallback to other fields when phone is not found', async () => {
+      await userService.create(mockUser());
+      const found = await userService.findByLogin('15158033280');
+      expect(found).toBeNull();
+    });
+  });
+
+  describe('countUser', () => {
+    it('should count users', async () => {
+      await userService.create(mockUser());
+      const count = await userService.count({});
+      expect(count).toBe(1);
+    });
+  });
+
+  describe('listUser', () => {
+    it('should list users', async () => {
+      await userService.create(mockUser());
+      const users = await userService.list({});
+      expect(users).toBeDefined();
+      expect(users).toHaveLength(1);
+    });
+  });
+
+  describe('updateUser', () => {
+    it('should update a user', async () => {
+      const user = await userService.create(mockUser());
+      const updateDoc = { intro: 'updated intro' };
+      const updated = await userService.update(user.id, updateDoc);
+      expect(updated).toBeDefined();
+      expect(updated).toMatchObject(updateDoc);
+    });
+  });
+
+  describe('deleteUser', () => {
+    it('should delete a user', async () => {
+      const user = await userService.create(mockUser());
+      await userService.delete(user.id);
+      const found = await userService.get(user.id);
+      expect(found).toEqual(null);
+    });
+  });
+
+  describe('getUser', () => {
+    it('should get a user', async () => {
+      const user = await userService.create(mockUser());
+      const found = await userService.get(user.id);
+      expect(found).toBeDefined();
+    });
+  });
+
+  describe('updatePassword', () => {
+    it('should set passwordChangedAt when password is updated', async () => {
+      const user = await userService.create(mockUser());
+      const before = Date.now();
+      const updated = await userService.updatePassword(user.id, 'new-secret-1');
+      expect(userService.checkPassword(updated.password, 'new-secret-1')).toBe(true);
+      expect(updated.passwordChangedAt).toBeInstanceOf(Date);
+      expect(updated.passwordChangedAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+  });
+
+  describe('upsertUser', () => {
+    it('should upsert a user', async () => {
+      const userDoc = mockUser();
+      const before = Date.now();
+      const user = await userService.upsertByPhone('18888888888', userDoc);
+      expect(user.email).toBe(userDoc.email);
+      expect(user.passwordChangedAt).toBeInstanceOf(Date);
+      expect(user.passwordChangedAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('should upsert a user by id', async () => {
+      const userId = `import-${nanoid(10)}`;
+      const userDoc = mockUser();
+      const created = await userService.upsertById(userId, userDoc);
+      expect(created.id).toBe(userId);
+
+      const updated = await userService.upsertById(userId, {
+        ...userDoc,
+        intro: 'updated by id',
+      });
+      expect(updated.id).toBe(userId);
+      expect(updated.intro).toBe('updated by id');
+    });
+
+    it('should map duplicate employeeId during upsert to the right error code', async () => {
+      const existing = await userService.create({
+        ...mockUser(),
+        employeeId: `emp-${nanoid(6)}`,
+      });
+
+      await userService.create(mockUser());
+
+      await expect(
+        userService.upsertByUsername(`user-${nanoid(6)}`, {
+          ...mockUser(),
+          employeeId: existing.employeeId,
+        })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ErrorCodes.EMPLOYEE_ID_ALREADY_EXISTS }),
+      });
+    });
+  });
+});

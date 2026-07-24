@@ -1,0 +1,45 @@
+name: 'PR Env'
+description: '从 PR body 中提取 +env:KEY=VALUE 和 +env:APP:KEY=VALUE 格式的环境变量'
+
+inputs:
+  text:
+    description: 'PR body 文本'
+    required: true
+
+outputs:
+  env:
+    description: '提取到的环境变量（JSON 格式）'
+    value: ${{ steps.extract.outputs.env }}
+  app_env_vars:
+    description: '按应用分组的环境变量（JSON 格式，如 {"admin_extra_env": [{"name":"K","value":"V"}]}）'
+    value: ${{ steps.extract.outputs.app_env_vars }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract env from PR body
+      id: extract
+      shell: bash
+      env:
+        TEXT: ${{ inputs.text }}
+      run: |
+        ENV_JSON="{}"
+        APP_ENV_JSON="{}"
+        while IFS= read -r line; do
+          if [[ "$line" =~ \+env:([a-zA-Z0-9_-]+):([^=]+)=(.+) ]]; then
+            APP="${BASH_REMATCH[1]}"
+            KEY="${BASH_REMATCH[2]}"
+            VALUE="${BASH_REMATCH[3]}"
+            APP_ENV_JSON=$(echo "$APP_ENV_JSON" | jq -c \
+              --arg app "${APP}_extra_env" --arg k "$KEY" --arg v "$VALUE" \
+              '.[$app] += [{"name": $k, "value": $v}]')
+          elif [[ "$line" =~ \+env:(.+)=(.+) ]]; then
+            KEY="${BASH_REMATCH[1]}"
+            VALUE="${BASH_REMATCH[2]}"
+            echo "${KEY}=${VALUE}" >> $GITHUB_ENV
+            ENV_JSON=$(echo "$ENV_JSON" | jq -c --arg k "$KEY" --arg v "$VALUE" '. + {($k): $v}')
+          fi
+        done <<< "$TEXT"
+
+        echo "env=$ENV_JSON" >> $GITHUB_OUTPUT
+        echo "app_env_vars=$APP_ENV_JSON" >> $GITHUB_OUTPUT

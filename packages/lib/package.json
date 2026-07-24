@@ -1,0 +1,27 @@
+{
+  "name": "@repo/lib",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./action": "./action/index.ts",
+    "./error": "./error/index.ts",
+    "./lang": "./lang/index.ts",
+    "./xlsx": "./xlsx/index.ts",
+    "./zod-helper": "./zod-helper/index.ts"
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo node_modules",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

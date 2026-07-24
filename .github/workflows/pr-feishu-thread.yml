@@ -1,0 +1,55 @@
+name: PR Feishu Thread
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  create-thread:
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout (for local actions)
+        uses: actions/checkout@v6
+
+      - name: Build PR link content
+        id: pr-content
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          POST_CONTENT=$(jq -cn \
+            --arg pr_number "$PR_NUMBER" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_url "$PR_URL" \
+            '{"zh_cn":{"content":[[{"tag":"a","text":"\($pr_title) #\($pr_number)","href":$pr_url}]]}}')
+          echo "content=$POST_CONTENT" >> $GITHUB_OUTPUT
+
+      - name: Create Feishu thread
+        id: create-thread
+        uses: ./.github/actions/feishu-send
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          chat_id: ${{ secrets.FEISHU_CHAT_ID }}
+          msg_type: post
+          content: ${{ steps.pr-content.outputs.content }}
+
+      - name: Reply with PR body
+        uses: ./.github/actions/feishu-reply
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          message_id: ${{ steps.create-thread.outputs.message_id }}
+          content: ${{ github.event.pull_request.body || '(无描述)' }}
+
+      - name: Save thread ID to PR comment
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          message: |
+            <!-- feishu_message_id: ${{ steps.create-thread.outputs.message_id }} -->
+            ⏳ CI 运行中...
+          comment-tag: deploy-urls

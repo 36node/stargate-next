@@ -1,0 +1,108 @@
+# Stargate Next
+
+Stargate Next 是一个基于 pnpm 与 Turborepo 的 Monorepo，用于承载下一代认证服务及其 Playground。
+
+## 应用
+
+- `apps/stargate`：保留为可本地运行的旧 Auth 参考服务，不属于 pnpm workspace 或 CI。
+- `apps/stargate-next`：NestJS 服务，也是 PostgreSQL 与 Redis 的唯一消费者。
+- `apps/playground`：通过旧 Stargate 进行认证的 Next.js 管理后台壳。
+
+## 包
+
+- `packages/auth-next-sdk`：为 Stargate Next OpenAPI 契约生成 API 绑定预留的占位包。
+- `packages/db`：仅包含 `Example` 模型的共享 Prisma Client。
+- `packages/next-stargate`：旧 Stargate 的 Next.js 会话、JWT 验证和 Cookie 集成。
+
+## 前置条件
+
+需要 Node.js 22.12+、pnpm 10 与 Docker。旧 Stargate 依赖与 Node 26 不兼容，请使用 Node 22：
+
+```bash
+nvm use 22
+pnpm install
+docker compose up -d
+```
+
+根目录的 `docker-compose.yaml` 会启动：
+
+- PostgreSQL：供 Stargate Next 使用，端口 `5432`
+- Redis：供新旧 Stargate 使用，端口 `6379`
+- MongoDB：供旧 Stargate 使用，端口 `27017`
+
+## 启动 Stargate Next
+
+先初始化 PostgreSQL schema，再启动新服务。默认监听 `9527`：
+
+```bash
+pnpm db:migrate
+pnpm --filter stargate-next dev
+```
+
+它使用以下环境变量：
+
+```dotenv
+DATABASE_URL=postgresql://postgres:123456@localhost:5432/stargate-next-local?schema=public
+REDIS_URL=redis://localhost:6379
+PORT=9527
+```
+
+`/health/live` 只检查进程存活；`/health/ready` 会检查 PostgreSQL 与 Redis。
+
+## 启动旧 Stargate
+
+旧服务位于 `apps/stargate`，有独立的 lockfile 和依赖，因此需单独安装。默认监听 `9527`，与 Stargate Next 保持兼容；两者不能同时使用默认端口：
+
+```bash
+cd apps/stargate
+CI=true pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts
+MONGO_URL=mongodb://localhost:27017/auth-dev \
+REDIS_URL=redis://localhost:6379 \
+API_KEY=playground-dev-api-key \
+JWT_SECRET_KEY=playground-dev-jwt-secret \
+PORT=9527 \
+pnpm dev
+```
+
+`--ignore-workspace` 很重要：`apps/stargate` 被根 workspace 排除，如果不带该参数，pnpm 仍会向上识别根 `pnpm-workspace.yaml`，导致依赖没有安装到旧服务自己的 `node_modules`，从而出现 `nest: command not found`。
+
+生产环境必须为 `API_KEY` 与 `JWT_SECRET_KEY` 使用独立的随机密钥，不能使用上述示例值。
+
+## 启动 Playground 并对接旧 Stargate
+
+Playground 默认监听 `3000`。其环境变量必须与旧 Stargate 的 API Key、JWT 签名配置完全匹配：
+
+```bash
+STARGATE_ENDPOINT=http://localhost:9527 \
+STARGATE_API_KEY=playground-dev-api-key \
+STARGATE_JWT_SECRET=playground-dev-jwt-secret \
+PORT=3000 \
+pnpm --filter playground dev
+```
+
+配置映射如下：
+
+| 旧 Stargate | Playground | 要求 |
+| --- | --- | --- |
+| `API_KEY` | `STARGATE_API_KEY` | 值必须相同；Playground 用它请求旧服务的 `/auth/@login`。 |
+| `JWT_SECRET_KEY` | `STARGATE_JWT_SECRET` | 使用 HS256 时值必须相同，用于验证登录后返回的 JWT。 |
+| 旧服务地址与 `PORT` | `STARGATE_ENDPOINT` | 指向旧 Stargate 的完整地址，例如 `http://localhost:9527`。 |
+| `JWT_SECRET_KEY` | `STARGATE_JWT_PUBLIC_KEY` | 仅旧服务改为 RS256 后使用其对应公钥；此时不设置 `STARGATE_JWT_SECRET`。 |
+
+`STARGATE_API_KEY` 仅在 Playground 服务端使用，不会发送到浏览器。Playground 不需要 PostgreSQL、Redis 或 MongoDB；`/health` 也不会访问任何外部资源。
+
+## 同时开发
+
+在基础设施启动且环境变量已配置后，可使用：
+
+```bash
+pnpm dev
+```
+
+它会启动 Playground（`3000`）和 Stargate Next（`9527`）。如需同时运行旧 Stargate，请为其中一个服务显式设置不同的 `PORT`。
+
+使用 `pnpm build`、`pnpm typecheck` 和 `pnpm test` 验证 workspace。
+
+架构与迁移计划见
+[`docs/rewrite-with-mekong.md`](docs/rewrite-with-mekong.md) 和
+[`docs/rewrite.md`](docs/rewrite.md)。

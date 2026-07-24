@@ -1,0 +1,57 @@
+name: 'PR Comment Data'
+description: '从 PR comments 中提取数据'
+
+inputs:
+  pattern:
+    description: '正则表达式模式，用于匹配和提取数据（需包含一个捕获组）'
+    required: true
+  github_token:
+    description: 'GitHub Token'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  value:
+    description: '提取到的值（如果没找到则为空字符串）'
+    value: ${{ steps.extract.outputs.value }}
+  found:
+    description: '是否找到匹配（true/false）'
+    value: ${{ steps.extract.outputs.found }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract data from PR comments
+      id: extract
+      uses: actions/github-script@v7
+      env:
+        PATTERN: ${{ inputs.pattern }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const pattern = process.env.PATTERN;
+          const regex = new RegExp(pattern);
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.pull_request.number
+          });
+
+          let value = '';
+          let found = false;
+
+          for (const comment of comments) {
+            const body = comment.body || '';
+            const match = body.match(regex);
+            if (match && match[1]) {
+              value = match[1];
+              found = true;
+              break;
+            }
+          }
+
+          core.setOutput('value', value);
+          core.setOutput('found', found);
+          console.log(`Pattern: ${pattern}`);
+          console.log(`Found: ${found}, Value: ${value}`);

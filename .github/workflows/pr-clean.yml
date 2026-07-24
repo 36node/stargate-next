@@ -1,0 +1,143 @@
+name: Clean PR deployments
+
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  DEPLOY: pr-${{ github.event.pull_request.number }}
+  CYCLOPS_BASE_URL: ${{ secrets.CYCLOPS_BASE_URL }}
+
+jobs:
+  clean:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (for local actions)
+        uses: actions/checkout@v6
+
+      - name: Clean PR deployments
+        id: clean
+        env:
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          APP_ID="stargate-next-${DEPLOY}"
+
+          fail() {
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          delete_app() {
+            local http_code
+            http_code="$(curl -sS -o /tmp/delete-response.json -w '%{http_code}' \
+              -X DELETE "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID" \
+              -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN")"
+
+            if [ "$http_code" != "204" ] && [ "$http_code" != "404" ]; then
+              cat /tmp/delete-response.json
+              fail "Delete app config failed with HTTP $http_code"
+            fi
+            echo "App config $APP_ID deleted (HTTP $http_code)"
+          }
+
+          # 获取 webhook token（404 表示应用不存在，无需清理）
+          HTTP_CODE="$(curl -sS -o /tmp/hooks.json -w '%{http_code}' \
+            "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID/hooks" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN")"
+
+          if [ "$HTTP_CODE" = "404" ]; then
+            echo "App $APP_ID not found; nothing to clean"
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            cat /tmp/hooks.json
+            fail "Get webhook token failed with HTTP $HTTP_CODE"
+          fi
+
+          TOKEN="$(jq -r '.token' /tmp/hooks.json)"
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            fail "Webhook token missing in hooks response"
+          fi
+          echo "::add-mask::$TOKEN"
+
+          # 触发卸载
+          HTTP_CODE="$(curl -sS -o /tmp/uninstall-trigger.json -w '%{http_code}' \
+            -X POST "$CYCLOPS_BASE_URL/api/hooks/$TOKEN/uninstall")"
+
+          if [ "$HTTP_CODE" = "409" ] && \
+             [ "$(jq -r '.code' /tmp/uninstall-trigger.json)" = "APPLICATION_NOT_INSTALLED" ]; then
+            echo "App $APP_ID not installed; deleting app config only"
+            delete_app
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$HTTP_CODE" != "202" ]; then
+            cat /tmp/uninstall-trigger.json
+            fail "Trigger uninstall failed with HTTP $HTTP_CODE"
+          fi
+
+          TASK_ID="$(jq -r '.task.id' /tmp/uninstall-trigger.json)"
+          if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "null" ]; then
+            fail "Task id missing in uninstall trigger response"
+          fi
+
+          STATUS_URL="$CYCLOPS_BASE_URL/api/hooks/$TOKEN/tasks/$TASK_ID"
+          LOGS_URL="$STATUS_URL/logs"
+
+          # SSE 日志流：任务终态时服务端发送 done 事件并关闭连接
+          # 只输出 event: log 的 data 内容，隐藏 status/done/keepalive 等事件
+          # 用 bash read 逐行处理，避免 mawk 输入缓冲导致日志不实时
+          echo "Streaming uninstall logs for task $TASK_ID"
+          timeout 1500 curl -NsS "$LOGS_URL" | {
+            current=""
+            while IFS= read -r line; do
+              case "$line" in
+                "event: "*) current="${line#event: }" ;;
+                "data: "*)  if [ "$current" = "log" ]; then printf '%s\n' "${line#data: }"; fi ;;
+                "data:"*)   if [ "$current" = "log" ]; then printf '%s\n' "${line#data:}"; fi ;;
+              esac
+            done
+          } || echo "::warning::Log stream ended unexpectedly"
+
+          # SSE 结束后以任务状态为准；若流提前断开则轮询等待终态
+          STATUS=""
+          for _ in $(seq 1 60); do
+            STATUS="$(curl -fsS "$STATUS_URL" | jq -r '.status' || echo '')"
+            case "$STATUS" in
+              SUCCEEDED|ERROR) break ;;
+            esac
+            echo "Task status: ${STATUS:-unknown}; waiting..."
+            sleep 10
+          done
+
+          if [ "$STATUS" != "SUCCEEDED" ]; then
+            fail "Uninstall task $TASK_ID finished with status: ${STATUS:-unknown}"
+          fi
+
+          echo "Uninstall task $TASK_ID succeeded"
+          delete_app
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+
+      - name: Get Feishu message ID from PR comments
+        id: pr-comments
+        uses: ./.github/actions/pr-comment-data
+        with:
+          pattern: '<!-- feishu_message_id: ([\w-]+) -->'
+
+      - name: Notify Feishu thread
+        if: ${{ steps.pr-comments.outputs.found == 'true' }}
+        uses: ./.github/actions/feishu-reply
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          message_id: ${{ steps.pr-comments.outputs.value }}
+          content: ${{ steps.clean.outputs.outcome == 'success' && '🗑️ PR 已关闭，部署环境已清理' || '❌ 部署环境清理失败' }}

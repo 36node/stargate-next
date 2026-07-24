@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  HARBOR_DOMAIN: harbor.36node.com
+  HARBOR_PROJECT: 36node
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      stargate_next_released: ${{ steps.release.outputs['apps/stargate-next--release_created'] }}
+      stargate_next_tag: ${{ steps.release.outputs['apps/stargate-next--tag_name'] }}
+      playground_released: ${{ steps.release.outputs['apps/playground--release_created'] }}
+      playground_tag: ${{ steps.release.outputs['apps/playground--tag_name'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  docker:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: arc-runners-haivivi
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build:ci --summarize
+        env:
+          NODE_ENV: production
+          BUILD_STANDALONE: "true"
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.HARBOR_DOMAIN }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+      - name: Plan release images
+        id: image-plan
+        env:
+          STARGATE_NEXT_RELEASED: ${{ needs.release-please.outputs.stargate_next_released }}
+          STARGATE_NEXT_TAG: ${{ needs.release-please.outputs.stargate_next_tag }}
+          PLAYGROUND_RELEASED: ${{ needs.release-please.outputs.playground_released }}
+          PLAYGROUND_TAG: ${{ needs.release-please.outputs.playground_tag }}
+        run: |
+          set -euo pipefail
+          targets=()
+          plan_image() {
+            local target="$1"
+            local image_target="$2"
+            local component="$3"
+            local released="$4"
+            local tag="$5"
+            local output="$6"
+            [ "$released" = "true" ] || return
+            version="${tag#"${component}-v"}"
+            test "$version" != "$tag"
+            image="${HARBOR_DOMAIN}/${HARBOR_PROJECT}/${image_target}"
+            {
+              echo "${output}<<EOF"
+              echo "${image}:${version}"
+              echo "${image}:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            targets+=("$target")
+          }
+          plan_image "stargate-next" "stargate-next" "stargate-next" "$STARGATE_NEXT_RELEASED" "$STARGATE_NEXT_TAG" "stargate_next_tags"
+          plan_image "playground" "stargate-next-playground" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
+          echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
+      - name: Build and push release images
+        if: steps.image-plan.outputs.bake_targets != ''
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-bake.hcl
+          push: true
+          targets: ${{ steps.image-plan.outputs.bake_targets }}
+        env:
+          STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
+          PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}

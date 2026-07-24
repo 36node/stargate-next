@@ -1,0 +1,675 @@
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  NotFoundException,
+  Post,
+  Query,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Cache } from 'cache-manager';
+import { get, isEqual } from 'lodash';
+
+import { JwtPayload } from 'src/auth';
+import { PhoneQuickAuthService } from 'src/auth/phone-quick-auth.service';
+import { CaptchaService } from 'src/captcha';
+import * as config from 'src/config';
+import { ErrorCodes } from 'src/constants';
+import { assertHttp } from 'src/lib/lang/assert';
+import { addShortTimeSpan } from 'src/lib/lang/time';
+import { OAuthService } from 'src/oauth';
+import { CreateSessionDto, SessionDocument, SessionService } from 'src/session';
+import { ThirdPartyService } from 'src/third-party';
+import { User, UserDocument, UserService } from 'src/user';
+
+import { AuthService } from './auth.service';
+import { GetAuthorizerQuery } from './dto/authorize-query.dto';
+import { GithubDto } from './dto/github.dto';
+import {
+  LoginByEmailDto,
+  LoginByPhoneDto,
+  LoginByPhoneQuickAuthDto,
+  LoginDto,
+  LogoutDto,
+} from './dto/login.dto';
+import { OAuthDto } from './dto/oauth.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { RegisterByEmailDto, RegisterbyPhoneDto, RegisterDto } from './dto/register.dto';
+import { ResetPasswordByEmailDto, ResetPasswordByPhoneDto } from './dto/reset-password.dto';
+import { SignTokenDto } from './dto/sign-token.dto';
+import { Authorizer } from './entities/authorizer.entity';
+import { SessionWithToken, Token } from './entities/session-with-token.entity';
+
+function checkUserActive(user: UserDocument) {
+  if (user.active === false) {
+    throw new ForbiddenException({
+      code: ErrorCodes.USER_INACTIVE,
+      message: 'user inactive',
+    });
+  }
+}
+
+@ApiTags('auth')
+@Controller('auth')
+export class AuthController {
+  constructor(
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly sessionService: SessionService,
+    private readonly userService: UserService,
+    private readonly jwtService: JwtService,
+    private readonly captchaService: CaptchaService,
+    private readonly authService: AuthService,
+    private readonly oauthService: OAuthService,
+    private readonly phoneQuickAuthService: PhoneQuickAuthService,
+    private readonly thirdPartyService: ThirdPartyService
+  ) {}
+
+  private invalidateUserCache(userId: string) {
+    return this.cacheManager.del(`/users/${userId}`);
+  }
+
+  /**
+   * login with username/phone/email and password
+   */
+  @ApiOperation({ operationId: 'login' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@login')
+  async login(@Body() loginDto: LoginDto): Promise<SessionWithToken> {
+    const locked = await this.authService.isLocked(loginDto.login);
+    if (locked) {
+      throw new ForbiddenException({
+        code: ErrorCodes.TOO_MANY_LOGIN_ATTEMPTS,
+        message: `too many login attempts.`,
+      });
+    }
+
+    const user = await this.userService.findByLogin(loginDto.login);
+    if (
+      !user ||
+      !user.password ||
+      !this.userService.checkPassword(user.password, loginDto.password)
+    ) {
+      await this.authService.lock(loginDto.login);
+
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `username or password invalid.`,
+      });
+    }
+
+    checkUserActive(user);
+
+    return this.authService.login(user);
+  }
+
+  @ApiOperation({ operationId: 'getAuthorizer' })
+  @Get('authorizer')
+  getAuthorizer(@Query() query: GetAuthorizerQuery): Authorizer {
+    const {
+      provider,
+      redirectUri: redirect_uri,
+      responseType: response_type = 'code',
+      state,
+    } = query;
+    const clientId = config.oauthProvider.clientId(provider);
+    const authorizeUrl = config.oauthProvider.authorizeUrl(provider);
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      response_type,
+      ...(redirect_uri && { redirect_uri }),
+      ...(state && { state }),
+    });
+
+    return {
+      url: `${authorizeUrl}?${params.toString()}`,
+    };
+  }
+
+  /**
+   * login by Github
+   */
+  @ApiOperation({ operationId: 'loginByGithub' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@loginByGithub')
+  async loginByGithub(@Body() githubDto: GithubDto): Promise<SessionWithToken> {
+    return this.loginByOAuth({
+      provider: 'github',
+      code: githubDto.code,
+      redirectUri: githubDto.redirectUri,
+    });
+  }
+
+  /**
+   * login by OAuth
+   */
+  @ApiOperation({ operationId: 'loginByOAuth' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@loginByOAuth')
+  async loginByOAuth(@Body() dto: OAuthDto): Promise<SessionWithToken> {
+    const { provider, code, grantType: grant_type, redirectUri: redirect_uri } = dto;
+    const clientId = config.oauthProvider.clientId(provider);
+    const clientSecret = config.oauthProvider.clientSecret(provider);
+    const accessTokenUrl = config.oauthProvider.accessTokenUrl(provider);
+    const getTokenUseQuery = config.oauthProvider.getTokenUseQuery(provider);
+
+    assertHttp(!!clientId, `clientId of ${provider} not found.`);
+    assertHttp(!!clientSecret, `clientSecret of ${provider} not found.`);
+    assertHttp(!!accessTokenUrl, `accessTokenUrl of ${provider} not found.`);
+
+    const result = await this.oauthService.getAccessToken(accessTokenUrl, {
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      grant_type,
+      redirect_uri,
+      getTokenUseQuery,
+    });
+    const expireAt = result.expires_in ? Date.now() + result.expires_in * 1000 : undefined;
+    const refreshTokenExpireAt = result.refresh_token_expires_in
+      ? Date.now() + result.refresh_token_expires_in * 1000
+      : undefined;
+
+    // 获取第三方的用户信息
+    const userInfoUrl = config.oauthProvider.userInfoUrl(provider);
+    assertHttp(!!userInfoUrl, `userInfoUrl of ${provider} not found.`);
+    const userInfo = await this.oauthService.getUserInfo(userInfoUrl, result.access_token);
+
+    // 创建或更新第三方数据
+    const tidField = config.oauthProvider.tidField(provider);
+    assertHttp(!!tidField, `tidField of ${provider} not found.`);
+    const tid = get(userInfo, tidField);
+    const thirdParty = await this.thirdPartyService.upsert(tid, provider, {
+      tid,
+      source: provider,
+      accessToken: result.access_token,
+      expireAt,
+      tokenType: result.token_type,
+      refreshToken: result.refresh_token,
+      refreshTokenExpireAt,
+      data: JSON.stringify(userInfo),
+    });
+
+    // 已绑定用户
+    if (thirdParty.uid) {
+      const user = await this.userService.get(thirdParty.uid);
+      if (!user) {
+        throw new UnauthorizedException({
+          code: ErrorCodes.AUTH_FAILED,
+          message: `user not found.`,
+        });
+      }
+
+      checkUserActive(user);
+      return this.authService.login(user);
+    }
+
+    // 未绑定用户
+    return this.authService.loginByThirdParty(thirdParty);
+  }
+
+  /**
+   * login by email and code
+   */
+  @ApiOperation({ operationId: 'loginByEmail' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@loginByEmail')
+  async loginByEmail(@Body() dto: LoginByEmailDto): Promise<SessionWithToken> {
+    let user = await this.userService.findByEmail(dto.email);
+
+    if (!user && !dto.autoRegister) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `email or captcha code wrong`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `email or captcha code wrong`,
+      });
+    }
+
+    if (!user) {
+      user = await this.userService.upsertByEmail(dto.email, {
+        email: dto.email,
+        ns: dto.ns,
+        inviter: dto.inviter,
+        labels: dto.labels,
+        registerIp: dto.registerIp,
+        registerRegion: dto.registerRegion,
+        type: dto.type,
+        ...(dto.active !== undefined && { active: dto.active }),
+        ...(dto.roles !== undefined && { roles: dto.roles }),
+      });
+    }
+
+    checkUserActive(user);
+    return this.authService.login(user);
+  }
+
+  /**
+   * login with phone and code
+   */
+  @ApiOperation({ operationId: 'loginByPhone' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@loginByPhone')
+  async loginByPhone(@Body() dto: LoginByPhoneDto): Promise<SessionWithToken> {
+    let user = await this.userService.findByPhone(dto.phone);
+
+    if (!user && !dto.autoRegister) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `phone or captcha code wrong`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `phone or captcha code wrong`,
+      });
+    }
+
+    if (!user) {
+      user = await this.userService.upsertByPhone(dto.phone, {
+        phone: dto.phone,
+        ns: dto.ns,
+        inviter: dto.inviter,
+        labels: dto.labels,
+        registerIp: dto.registerIp,
+        registerRegion: dto.registerRegion,
+        type: dto.type,
+        ...(dto.active !== undefined && { active: dto.active }),
+        ...(dto.roles !== undefined && { roles: dto.roles }),
+      });
+    }
+
+    checkUserActive(user);
+    return this.authService.login(user);
+  }
+
+  /**
+   * login with phone and quick auth token
+   */
+  @ApiOperation({ operationId: 'loginByPhoneQuickAuth' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully created.',
+    type: SessionWithToken,
+  })
+  @Post('@loginByPhoneQuickAuth')
+  async loginByPhoneQuickAuth(@Body() dto: LoginByPhoneQuickAuthDto): Promise<SessionWithToken> {
+    const phone = await this.phoneQuickAuthService.verify(dto.token);
+    if (!phone) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `phone quick auth verify failed`,
+      });
+    }
+
+    let user = await this.userService.findByPhone(phone);
+
+    if (!user && !dto.autoRegister) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.AUTH_FAILED,
+        message: `phone wrong`,
+      });
+    }
+
+    if (!user) {
+      user = await this.userService.upsertByPhone(phone, {
+        phone: phone,
+        ns: dto.ns,
+        inviter: dto.inviter,
+        labels: dto.labels,
+        registerIp: dto.registerIp,
+        registerRegion: dto.registerRegion,
+        type: dto.type,
+        ...(dto.active !== undefined && { active: dto.active }),
+        ...(dto.roles !== undefined && { roles: dto.roles }),
+      });
+    }
+
+    checkUserActive(user);
+    return this.authService.login(user);
+  }
+
+  /**
+   * logout
+   */
+  @ApiOperation({ operationId: 'logout' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('@logout')
+  async logout(@Body() dto: LogoutDto): Promise<void> {
+    await this.sessionService.delete(dto.sid);
+  }
+
+  /**
+   * register with username and password
+   */
+  @ApiOperation({ operationId: 'register' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The user just created.',
+    type: User,
+  })
+  @Post('@register')
+  async register(@Body() dto: RegisterDto): Promise<UserDocument> {
+    const user = await this.userService.findByUsername(dto.username);
+    if (user) {
+      throw new ConflictException({
+        code: ErrorCodes.USER_ALREADY_EXISTS,
+        message: `username ${dto.username} already exists.`,
+        details: [
+          {
+            message: `username ${dto.username} already exists.`,
+            field: 'username',
+          },
+        ],
+      });
+    }
+
+    return this.userService.create({
+      username: dto.username,
+      password: dto.password,
+      ns: dto.ns,
+      inviter: dto.inviter,
+      labels: dto.labels,
+      registerIp: dto.registerIp,
+      registerRegion: dto.registerRegion,
+      type: dto.type,
+    });
+  }
+
+  /**
+   * register with phone and code
+   */
+  @ApiOperation({ operationId: 'registerByPhone' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The user just created.',
+    type: User,
+  })
+  @Post('@registerByPhone')
+  async registerByPhone(@Body() dto: RegisterbyPhoneDto): Promise<UserDocument> {
+    const user = await this.userService.findByPhone(dto.phone);
+    if (user) {
+      throw new ConflictException({
+        code: ErrorCodes.USER_ALREADY_EXISTS,
+        message: `phone ${dto.phone} already exists.`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new BadRequestException({
+        code: ErrorCodes.CAPTCHA_INVALID,
+        message: 'captcha invalid.',
+      });
+    }
+
+    return this.userService.create({
+      phone: dto.phone,
+      ns: dto.ns,
+      inviter: dto.inviter,
+      labels: dto.labels,
+      registerIp: dto.registerIp,
+      registerRegion: dto.registerRegion,
+      type: dto.type,
+    });
+  }
+
+  /**
+   * register with email and code
+   */
+  @ApiOperation({ operationId: 'registerByEmail' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The user just created.',
+    type: User,
+  })
+  @Post('@registerByEmail')
+  async registerByEmail(@Body() dto: RegisterByEmailDto): Promise<UserDocument> {
+    const user = await this.userService.findByEmail(dto.email);
+    if (user) {
+      throw new ConflictException({
+        code: ErrorCodes.USER_ALREADY_EXISTS,
+        message: `email ${dto.email} already exists.`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new BadRequestException({
+        code: ErrorCodes.CAPTCHA_INVALID,
+        message: 'captcha invalid.',
+      });
+    }
+
+    return this.userService.create({
+      email: dto.email,
+      ns: dto.ns,
+      inviter: dto.inviter,
+      labels: dto.labels,
+      registerIp: dto.registerIp,
+      registerRegion: dto.registerRegion,
+      type: dto.type,
+    });
+  }
+
+  /**
+   * sign token
+   * 为用户签发一个一次性的 token 无法 refresh
+   */
+  @ApiOperation({ operationId: 'signToken' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The token has been successfully signed.',
+    type: Token,
+  })
+  @Post('@signToken')
+  async signToken(@Body() dto: SignTokenDto): Promise<Token> {
+    const user = await this.userService.get(dto.uid);
+    if (!user) {
+      throw new NotFoundException({
+        code: ErrorCodes.USER_NOT_FOUND,
+        message: `user ${dto.uid} not found.`,
+      });
+    }
+
+    const jwtpayload: JwtPayload = {
+      roles: user.roles,
+      ns: user.ns,
+      type: user.type,
+      groups: user.groups,
+      permissions: dto.permissions,
+      acl: dto.acl,
+    };
+
+    const token = this.jwtService.sign(jwtpayload, {
+      expiresIn: dto.expiresIn,
+      subject: user.id,
+    });
+    const tokenExpireAt = addShortTimeSpan(dto.expiresIn);
+
+    return {
+      token,
+      tokenExpireAt,
+    };
+  }
+
+  /**
+   * refresh
+   */
+  @ApiOperation({ operationId: 'refresh' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    description: 'The session with token has been successfully refreshed.',
+    type: SessionWithToken,
+  })
+  @Post('@refresh')
+  async refresh(@Body() dto: RefreshTokenDto): Promise<SessionWithToken> {
+    let session = await this.sessionService.findByKey(dto.refreshToken);
+    if (!session) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.SESSION_NOT_FOUND,
+        message: `session with key ${dto.refreshToken} not found.`,
+      });
+    }
+
+    if (session.expireAt.getTime() < Date.now()) {
+      throw new UnauthorizedException({
+        code: ErrorCodes.SESSION_EXPIRED,
+        message: 'Session has been expired.',
+      });
+    }
+
+    const payload: JwtPayload = {
+      source: session.source,
+      permissions: session.permissions,
+      acl: session.acl,
+      roles: session.roles,
+    };
+
+    // 系统用户，不是第三方用户
+    if (!session.source) {
+      const user = await this.userService.get(session.subject);
+      if (!user) {
+        throw new UnauthorizedException({
+          code: ErrorCodes.USER_NOT_FOUND,
+          message: `user ${session.subject} not found.`,
+        });
+      }
+
+      checkUserActive(user);
+
+      payload.ns = user.ns;
+      payload.groups = user.groups;
+      payload.roles = user.roles;
+      payload.type = user.type;
+      payload.permissions = await this.authService.calcUserExtraPermissions(user);
+    }
+
+    // 检查 session 是否需要更新
+    if (session.shouldRotate()) {
+      session = await this.sessionService.create({
+        ...payload,
+        subject: session.subject,
+        expireAt: addShortTimeSpan(config.auth.refreshTokenExpiresIn),
+      } as CreateSessionDto);
+    } else if (isSessionChange(session, payload)) {
+      // 如果 session 需要更新，则更新 session
+      session = await this.sessionService.update(session.id, {
+        ...payload,
+      } as CreateSessionDto);
+    }
+
+    payload.sid = session.id;
+
+    const tokenExpireAt = addShortTimeSpan(config.auth.tokenExpiresIn);
+    const token = this.jwtService.sign(payload, {
+      expiresIn: config.auth.tokenExpiresIn,
+      subject: session.subject,
+    });
+
+    return {
+      ...session.toJSON(),
+      token,
+      tokenExpireAt,
+    };
+  }
+
+  /**
+   * Reset password by phone
+   */
+  @ApiOperation({ operationId: 'resetPasswordByPhone' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('@resetPasswordByPhone')
+  async resetPasswordByPhone(@Body() dto: ResetPasswordByPhoneDto): Promise<void> {
+    const user = await this.userService.findByPhone(dto.phone);
+    if (!user) {
+      throw new NotFoundException({
+        code: ErrorCodes.USER_NOT_FOUND,
+        message: `User with phone ${dto.phone} not found.`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new BadRequestException({
+        code: ErrorCodes.CAPTCHA_INVALID,
+        message: 'captcha invalid.',
+      });
+    }
+
+    await this.userService.updatePassword(user.id, dto.password);
+    await this.invalidateUserCache(user.id);
+  }
+
+  /**
+   * Reset password by email
+   */
+  @ApiOperation({ operationId: 'resetPasswordByEmail' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('@resetPasswordByEmail')
+  async resetPasswordByEmail(@Body() dto: ResetPasswordByEmailDto): Promise<void> {
+    const user = await this.userService.findByEmail(dto.email);
+    if (!user) {
+      throw new NotFoundException({
+        code: ErrorCodes.USER_NOT_FOUND,
+        message: `User with email ${dto.email} not found.`,
+      });
+    }
+
+    if (!(await this.captchaService.consume(dto.key, dto.code))) {
+      throw new BadRequestException({
+        code: ErrorCodes.CAPTCHA_INVALID,
+        message: 'captcha invalid.',
+      });
+    }
+
+    await this.userService.updatePassword(user.id, dto.password);
+    await this.invalidateUserCache(user.id);
+  }
+}
+
+function isSessionChange(session: SessionDocument, payload: JwtPayload) {
+  const areArraysEqual = (arr1: any[], arr2: any[]) => isEqual(new Set(arr1), new Set(arr2));
+
+  return (
+    session.ns !== payload.ns ||
+    session.type !== payload.type ||
+    !areArraysEqual(session.groups, payload.groups) ||
+    !areArraysEqual(session.roles, payload.roles) ||
+    !areArraysEqual(session.permissions, payload.permissions) ||
+    !isEqual(session.acl, payload.acl)
+  );
+}

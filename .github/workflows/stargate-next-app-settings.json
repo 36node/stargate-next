@@ -1,0 +1,45 @@
+{
+  "id": "stargate-next-{{deploy}}",
+  "name": "Stargate Next {{deploy | uppercase}}",
+  "namespace": "stargate-next-{{deploy}}",
+  "playbook": {
+    "externalHelmChart": {
+      "registry": "harbor.36node.com"
+    },
+    "extraVars": {
+      "deploy": {
+        "default": "{{deploy}}",
+        "overridable": false
+      },
+      "image_pull_policy": {
+        "default": "IfNotPresent",
+        "label": "Image pull policy",
+        "overridable": true
+      },
+      "stargate_next_tag": {
+        "default": "main",
+        "label": "Stargate Next image tag",
+        "overridable": true
+      },
+      "stargate_next_playground_tag": {
+        "default": "main",
+        "label": "Stargate Next Playground image tag",
+        "overridable": true
+      }
+    },
+    "image": "harbor.36node.com/36node/cluster",
+    "inventory": "z-aliyun-stage",
+    "site": "auth",
+    "tag": "main"
+  },
+  "services": [
+    {
+      "name": "stargate-next",
+      "type": "Deployment"
+    },
+    {
+      "name": "playground",
+      "type": "Deployment"
+    }
+  ]
+}
