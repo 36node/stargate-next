@@ -51,20 +51,25 @@ PORT=9527
 
 ## 启动旧 Stargate
 
-旧服务位于 `apps/stargate`，有独立的 lockfile 和依赖，因此需单独安装。默认监听 `9527`，与 Stargate Next 保持兼容；两者不能同时使用默认端口：
+旧服务位于 `apps/stargate`，有独立的 lockfile 和依赖。默认监听 `9527`，与 Stargate Next 保持兼容；两者不能同时使用默认端口：
 
 ```bash
-cd apps/stargate
-CI=true pnpm install --ignore-workspace --frozen-lockfile --ignore-scripts
-MONGO_URL=mongodb://localhost:27017/auth-dev \
-REDIS_URL=redis://localhost:6379 \
-API_KEY=playground-dev-api-key \
-JWT_SECRET_KEY=playground-dev-jwt-secret \
-PORT=9527 \
-pnpm dev
+pnpm dev:stargate
 ```
 
-`--ignore-workspace` 很重要：`apps/stargate` 被根 workspace 排除，如果不带该参数，pnpm 仍会向上识别根 `pnpm-workspace.yaml`，导致依赖没有安装到旧服务自己的 `node_modules`，从而出现 `nest: command not found`。
+该命令要求已通过前置步骤启动 Redis 与 MongoDB；它会在必要时为 `apps/stargate` 安装独立依赖，然后使用以下默认环境变量启动旧服务：
+
+```dotenv
+MONGO_URL=mongodb://localhost:27017/auth-dev
+REDIS_URL=redis://localhost:6379
+API_KEY=playground-dev-api-key
+JWT_SECRET_KEY=playground-dev-jwt-secret
+PORT=9527
+```
+
+可以在命令前覆盖这些变量，例如 `PORT=9528 pnpm dev:stargate`。
+
+脚本安装依赖时会使用 `--ignore-workspace`：`apps/stargate` 被根 workspace 排除，如果不带该参数，pnpm 仍会向上识别根 `pnpm-workspace.yaml`，导致依赖没有安装到旧服务自己的 `node_modules`，从而出现 `nest: command not found`。
 
 生产环境必须为 `API_KEY` 与 `JWT_SECRET_KEY` 使用独立的随机密钥，不能使用上述示例值。
 
@@ -76,7 +81,6 @@ Playground 默认监听 `3000`。其环境变量必须与旧 Stargate 的 API Ke
 STARGATE_ENDPOINT=http://localhost:9527 \
 STARGATE_API_KEY=playground-dev-api-key \
 STARGATE_JWT_SECRET=playground-dev-jwt-secret \
-PORT=3000 \
 pnpm --filter playground dev
 ```
 
@@ -89,7 +93,7 @@ pnpm --filter playground dev
 | 旧服务地址与 `PORT` | `STARGATE_ENDPOINT` | 指向旧 Stargate 的完整地址，例如 `http://localhost:9527`。 |
 | `JWT_SECRET_KEY` | `STARGATE_JWT_PUBLIC_KEY` | 仅旧服务改为 RS256 后使用其对应公钥；此时不设置 `STARGATE_JWT_SECRET`。 |
 
-`STARGATE_API_KEY` 仅在 Playground 服务端使用，不会发送到浏览器。Playground 不需要 PostgreSQL、Redis 或 MongoDB；`/health` 也不会访问任何外部资源。
+`STARGATE_API_KEY` 仅在 Playground 服务端使用，不会发送到浏览器。Playground 的开发端口由 `apps/playground/package.json` 中的 `next dev -p 3000` 指定。Playground 不需要 PostgreSQL、Redis 或 MongoDB；`/health` 也不会访问任何外部资源。
 
 ## 同时开发
 

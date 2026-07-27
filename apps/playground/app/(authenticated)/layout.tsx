@@ -14,10 +14,8 @@ export default async function AuthenticatedLayout({
         <p className="eyebrow">Stargate</p>
         <strong>Playground</strong>
         <nav>
-          <a aria-current="page" href="/">
-            首页
-          </a>
-          <span>账号管理</span>
+          <a href="/">首页</a>
+          <a href="/accounts">账号管理</a>
         </nav>
       </aside>
       <div className="app-content">

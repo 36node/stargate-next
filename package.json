@@ -5,6 +5,7 @@
     "build": "turbo build",
     "build:ci": "turbo build:ci",
     "dev": "turbo dev --filter=playground --filter=stargate-next",
+    "dev:stargate": "scripts/dev-stargate-legacy.sh",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "test": "turbo test",
