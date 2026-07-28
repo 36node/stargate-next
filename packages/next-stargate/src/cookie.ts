@@ -10,55 +10,76 @@ export const CookieOptions = {
   path: "/",
 };
 
+export type SessionCookieNames = {
+  refresh: string;
+  token: string;
+};
+
+export const defaultSessionCookieNames: SessionCookieNames = {
+  refresh: RefreshTokenCookieKey,
+  token: TokenCookieKey,
+};
+
 async function setSessionTokenCookie(
   token: string,
   tokenExpireAt: Date,
-  secure?: boolean
+  secure?: boolean,
+  cookieName = TokenCookieKey
 ): Promise<void> {
-  (await cookies()).set(TokenCookieKey, token, {
+  (await cookies()).set(cookieName, token, {
     secure,
     expires: tokenExpireAt,
     ...CookieOptions,
   });
 }
 
-async function getSessionTokenFromCookie() {
-  return (await cookies()).get(TokenCookieKey)?.value;
+async function getSessionTokenFromCookie(cookieName = TokenCookieKey) {
+  return (await cookies()).get(cookieName)?.value;
 }
 
-async function getRefreshTokenFromCookie() {
-  return (await cookies()).get(RefreshTokenCookieKey)?.value;
+async function getRefreshTokenFromCookie(cookieName = RefreshTokenCookieKey) {
+  return (await cookies()).get(cookieName)?.value;
 }
 
 async function setRefreshTokenCookie(
   refreshToken: string,
   refreshTokenExpireAt: Date,
-  secure?: boolean
+  secure?: boolean,
+  cookieName = RefreshTokenCookieKey
 ): Promise<void> {
-  (await cookies()).set(RefreshTokenCookieKey, refreshToken, {
+  (await cookies()).set(cookieName, refreshToken, {
     secure,
     expires: refreshTokenExpireAt,
     ...CookieOptions,
   });
 }
 
-async function clearSessionCookies() {
+async function clearSessionCookies(
+  cookieNames: SessionCookieNames = defaultSessionCookieNames
+) {
   const cookieStore = await cookies();
-  cookieStore.delete(TokenCookieKey);
-  cookieStore.delete(RefreshTokenCookieKey);
+  cookieStore.delete(cookieNames.token);
+  cookieStore.delete(cookieNames.refresh);
 }
 
 async function setSessionCookies(
   session: SessionWithToken,
   secure?: boolean,
-  rememberMe?: boolean
+  rememberMe?: boolean,
+  cookieNames: SessionCookieNames = defaultSessionCookieNames
 ) {
   const keepalive = rememberMe ?? true;
-  await setSessionTokenCookie(session.token, session.tokenExpireAt, secure);
+  await setSessionTokenCookie(
+    session.token,
+    session.tokenExpireAt,
+    secure,
+    cookieNames.token
+  );
   await setRefreshTokenCookie(
     session.key,
     keepalive ? session.expireAt : session.tokenExpireAt,
-    secure
+    secure,
+    cookieNames.refresh
   );
 }
 

@@ -1,6 +1,10 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+
 import { auth } from "@repo/services/auth/client";
+import { env } from "@repo/services/env";
+import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
 
 export type AccountActionState = {
@@ -20,6 +24,12 @@ function actionError(): AccountActionState {
   return { error: "操作失败，请稍后重试。" };
 }
 
+function nextClient() {
+  return new StargateNextClient(env.STARGATE_ENDPOINT, {
+    apiKey: env.STARGATE_API_KEY,
+  });
+}
+
 export async function createAccountAction(
   formData: FormData
 ): Promise<AccountActionState> {
@@ -28,7 +38,14 @@ export async function createAccountAction(
   const password = getRequiredString(formData, "password");
   const confirmPassword = getRequiredString(formData, "confirmPassword");
 
-  if (!(username && name && password && confirmPassword)) {
+  if (
+    !(
+      username &&
+      password &&
+      confirmPassword &&
+      (env.STARGATE_AUTH_BACKEND === "next" || name)
+    )
+  ) {
     return { error: "请填写登录用户名、账号名称和密码。" };
   }
 
@@ -37,9 +54,18 @@ export async function createAccountAction(
   }
 
   try {
-    await auth.createUser({
-      body: { active: true, name, password, username },
-    });
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      await nextClient().createAccount({
+        active: true,
+        idempotencyKey: randomUUID(),
+        password,
+        username,
+      });
+    } else {
+      await auth.createUser({
+        body: { active: true, name, password, username },
+      });
+    }
     revalidatePath("/accounts");
     return { success: true };
   } catch {
@@ -58,6 +84,9 @@ export async function updateAccountNameAction(
   }
 
   try {
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      return { error: "Stargate Next 不支持编辑账号名称。" };
+    }
     await auth.updateUser({ body: { name }, path: { userId } });
     revalidatePath("/accounts");
     return { success: true };
@@ -77,10 +106,14 @@ export async function updateAccountActiveAction(
   }
 
   try {
-    await auth.updateUser({
-      body: { active: active === "true" },
-      path: { userId },
-    });
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      await nextClient().patchAccount(userId, { active: active === "true" });
+    } else {
+      await auth.updateUser({
+        body: { active: active === "true" },
+        path: { userId },
+      });
+    }
     revalidatePath("/accounts");
     return { success: true };
   } catch {
@@ -98,7 +131,11 @@ export async function deleteAccountAction(
   }
 
   try {
-    await auth.deleteUser({ path: { userId } });
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      await nextClient().deleteAccount(userId);
+    } else {
+      await auth.deleteUser({ path: { userId } });
+    }
     revalidatePath("/accounts");
     return { success: true };
   } catch {
@@ -122,7 +159,11 @@ export async function resetAccountPasswordAction(
   }
 
   try {
-    await auth.updatePassword({ body: { newPassword }, path: { userId } });
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      await nextClient().changePassword(userId, newPassword);
+    } else {
+      await auth.updatePassword({ body: { newPassword }, path: { userId } });
+    }
     return { success: true };
   } catch {
     return actionError();

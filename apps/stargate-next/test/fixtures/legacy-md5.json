@@ -1,0 +1,16 @@
+[
+  {
+    "id": "legacy-md5-fixture",
+    "password": "stargate@36node",
+    "passwordAlgorithm": "legacy-md5",
+    "passwordHash": "legacySalt123a0d77d0d1483de17ecf329fe814ebb29",
+    "username": "stargate"
+  },
+  {
+    "id": "legacy-md5-bus-admin",
+    "password": "Bus123456",
+    "passwordAlgorithm": "legacy-md5",
+    "passwordHash": "busAdminSalt1cfbebdfa42914cb8cc099ab9858251c7",
+    "username": "bus-admin"
+  }
+]

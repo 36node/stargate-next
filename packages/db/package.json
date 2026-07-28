@@ -21,7 +21,7 @@
     "push:force": "prisma db push --force-reset && prisma generate",
     "migrate:push": "prisma db push",
     "migrate:push:force": "prisma db push --force-reset",
-    "migrate:deploy": "prisma db push",
+    "migrate:deploy": "prisma migrate deploy",
     "prisma": "prisma",
     "studio": "prisma studio",
     "typecheck": "tsc -p tsconfig.json --noEmit"

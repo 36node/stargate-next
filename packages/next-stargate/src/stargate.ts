@@ -9,11 +9,11 @@ import { cache } from "react";
 import {
   CookieOptions,
   clearSessionCookies,
+  defaultSessionCookieNames,
   getRefreshTokenFromCookie,
   getSessionTokenFromCookie,
-  RefreshTokenCookieKey,
+  type SessionCookieNames,
   setSessionCookies,
-  TokenCookieKey,
 } from "./cookie";
 import { findProviderByPathname, safeParseState } from "./helper";
 import type {
@@ -53,6 +53,7 @@ async function resolveVerifyKey(config: JwtVerifyConfig): Promise<ResolvedKey> {
 export type StargateConfig = {
   auth: AuthService;
   cookieSecure?: boolean;
+  cookieNames?: SessionCookieNames;
   jwt: JwtVerifyConfig;
   pages: {
     login: string;
@@ -65,6 +66,7 @@ export type StargateConfig = {
 export function NextStargate({
   auth,
   cookieSecure,
+  cookieNames = defaultSessionCookieNames,
   jwt,
   pages,
   providers,
@@ -78,13 +80,18 @@ export function NextStargate({
   }
 
   async function signInWithCredentials(
-    { login, password }: SignInCredential,
+    { captchaCode, captchaId, login, password }: SignInCredential,
     state?: SignInState
   ) {
     const res = await auth.login({
-      body: { login, password },
+      body: { captchaCode, captchaId, login, password },
     });
-    await setSessionCookies(res.data, cookieSecure, Boolean(state?.rememberMe));
+    await setSessionCookies(
+      res.data,
+      cookieSecure,
+      Boolean(state?.rememberMe),
+      cookieNames
+    );
     const redirectUrl = state?.from ?? pages.loginRedirect;
     redirect(redirectUrl);
   }
@@ -159,7 +166,7 @@ export function NextStargate({
   }
 
   async function loadSessionFromCookie(): Promise<Session | undefined> {
-    const token = await getSessionTokenFromCookie();
+    const token = await getSessionTokenFromCookie(cookieNames.token);
     if (!token) {
       return;
     }
@@ -201,7 +208,7 @@ export function NextStargate({
   async function refreshSession(
     response?: NextResponse
   ): Promise<SessionWithToken | undefined> {
-    const refreshToken = await getRefreshTokenFromCookie();
+    const refreshToken = await getRefreshTokenFromCookie(cookieNames.refresh);
     if (!refreshToken) {
       return;
     }
@@ -211,12 +218,12 @@ export function NextStargate({
     });
 
     if (response) {
-      response.cookies.set(TokenCookieKey, res.data.token, {
+      response.cookies.set(cookieNames.token, res.data.token, {
         secure: cookieSecure,
         expires: res.data.tokenExpireAt,
         ...CookieOptions,
       });
-      response.cookies.set(RefreshTokenCookieKey, res.data.key, {
+      response.cookies.set(cookieNames.refresh, res.data.key, {
         secure: cookieSecure,
         expires: res.data.expireAt,
         ...CookieOptions,
@@ -231,8 +238,13 @@ export function NextStargate({
     if (!session) {
       return;
     }
-    await auth.logout({ body: { sid: session.id } });
-    await clearSessionCookies();
+    await auth.logout({
+      body: {
+        sid: session.id,
+        token: await getSessionTokenFromCookie(cookieNames.token),
+      },
+    });
+    await clearSessionCookies(cookieNames);
     redirect(pages.login);
   }
 
@@ -287,7 +299,7 @@ export function NextStargate({
       return NextResponse.redirect(loginUrl);
     }
 
-    await setSessionCookies(session, cookieSecure);
+    await setSessionCookies(session, cookieSecure, undefined, cookieNames);
 
     let redirectTo: URL;
     if (session.source && pages.bindRedirect) {

@@ -21,7 +21,10 @@
     }
   },
   "javascript": {
-    "globals": ["Liveblocks"]
+    "globals": ["Liveblocks"],
+    "parser": {
+      "unsafeParameterDecoratorsEnabled": true
+    }
   },
   "files": {
     "includes": [
@@ -33,7 +36,10 @@
       "!packages/collaboration/config.ts",
       "!packages/cms/basehub-types.d.ts",
       // 排除框架自动生成的代码检查
-      "!packages/db/generated"
+      "!packages/db/generated",
+      "!apps/stargate-next/src/auth-core.ts",
+      "!packages/stargate-next-sdk/src/generated.ts",
+      "!packages/stargate-next-sdk/src/openapi.ts"
     ]
   },
   "linter": {

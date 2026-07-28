@@ -46,7 +46,12 @@ export type Provider = {
   scope?: string;
 };
 
-export type SignInCredential = { login: string; password: string };
+export type SignInCredential = {
+  captchaCode?: string;
+  captchaId?: string;
+  login: string;
+  password: string;
+};
 export type SignInProvider = string;
 export type SignInParams = SignInCredential | SignInProvider;
 export type SignInState = {
@@ -58,6 +63,8 @@ export type AuthLoginParams = {
   body: {
     login: string;
     password: string;
+    captchaId?: string;
+    captchaCode?: string;
   };
 };
 
@@ -111,6 +118,7 @@ export type AuthRefreshResponse = {
 export type AuthLogoutParams = {
   body: {
     sid: string;
+    token?: string;
   };
 };
 

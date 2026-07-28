@@ -7,8 +7,65 @@ datasource db {
   provider = "postgresql"
 }
 
-model Example {
-  id         String   @id @default(cuid())
-  created_at DateTime @default(now()) @db.Timestamptz
-  updated_at DateTime @updatedAt @db.Timestamptz
+model Account {
+  id                String    @id @default(cuid())
+  status            String
+  username          String    @unique
+  phone             String?   @unique
+  email             String?   @unique
+  passwordAlgorithm String    @map("password_algorithm")
+  passwordHash      String    @map("password_hash")
+  passwordChangedAt DateTime  @map("password_changed_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz
+  idempotencyKeys   AccountCreateIdempotency[]
+  sessions          Session[]
+
+  @@map("accounts")
+}
+
+model AccountCreateIdempotency {
+  key         String   @id
+  requestHash String   @map("request_hash")
+  accountId   String?  @map("account_id")
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  account     Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@map("account_create_idempotency")
+}
+
+model Session {
+  id                  String   @id @default(cuid())
+  accountId           String   @map("account_id")
+  refreshKeyHash      String   @map("refresh_key_hash")
+  refreshKeyHmacKeyId String   @map("refresh_key_hmac_key_id")
+  expiresAt           DateTime @map("expires_at") @db.Timestamptz
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  account             Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([refreshKeyHmacKeyId, refreshKeyHash])
+  @@index([accountId, expiresAt])
+  @@map("sessions")
+}
+
+model AuthAuditEvent {
+  id        String   @id @default(cuid())
+  eventType String   @map("event_type")
+  accountId String?  @map("account_id")
+  sessionId String?  @map("session_id")
+  success   Boolean
+  actorType String   @map("actor_type")
+  actorId   String?  @map("actor_id")
+  requestId String?  @map("request_id")
+  ip        String?
+  userAgent String?  @map("user_agent")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("auth_audit_events")
 }

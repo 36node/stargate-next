@@ -20,7 +20,11 @@ type AccountActionsProps = {
 
 const initialState: AccountActionState = {};
 
-export function CreateAccountButton() {
+export function CreateAccountButton({
+  allowName = true,
+}: {
+  allowName?: boolean;
+}) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState(initialState);
   const [isPending, startTransition] = useTransition();
@@ -69,10 +73,12 @@ export function CreateAccountButton() {
             登录用户名
             <input autoComplete="username" name="username" required />
           </label>
-          <label>
-            账号名称
-            <input name="name" required />
-          </label>
+          {allowName ? (
+            <label>
+              账号名称
+              <input name="name" required />
+            </label>
+          ) : null}
           <label>
             密码
             <input
@@ -170,10 +176,11 @@ export function AccountStatusSwitch({
 }
 
 export function AccountActions({
+  allowNameEdit = true,
   name,
   userId,
   username,
-}: AccountActionsProps) {
+}: AccountActionsProps & { allowNameEdit?: boolean }) {
   const editDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const passwordDialogRef = useRef<HTMLDialogElement>(null);
@@ -243,13 +250,15 @@ export function AccountActions({
   return (
     <>
       <div className="account-actions">
-        <button
-          className="text-button"
-          onClick={() => openDialog(editDialogRef, setEditState)}
-          type="button"
-        >
-          编辑
-        </button>
+        {allowNameEdit ? (
+          <button
+            className="text-button"
+            onClick={() => openDialog(editDialogRef, setEditState)}
+            type="button"
+          >
+            编辑
+          </button>
+        ) : null}
         <button
           className="text-button"
           onClick={() => openDialog(passwordDialogRef, setPasswordState)}
@@ -266,38 +275,40 @@ export function AccountActions({
         </button>
       </div>
 
-      <dialog className="account-dialog" ref={editDialogRef}>
-        <form className="dialog-form" onSubmit={handleEditSubmit}>
-          <input name="userId" type="hidden" value={userId} />
-          <div className="dialog-heading">
-            <h2>编辑账号</h2>
-            <p>登录用户名不可修改。</p>
-          </div>
-          <label>
-            登录用户名
-            <input disabled value={username} />
-          </label>
-          <label>
-            账号名称
-            <input defaultValue={name} name="name" required />
-          </label>
-          {editState.error ? (
-            <p className="form-error">{editState.error}</p>
-          ) : null}
-          <div className="dialog-actions">
-            <button
-              className="secondary-button"
-              onClick={() => editDialogRef.current?.close()}
-              type="button"
-            >
-              取消
-            </button>
-            <button disabled={isEditPending} type="submit">
-              {isEditPending ? "保存中…" : "保存"}
-            </button>
-          </div>
-        </form>
-      </dialog>
+      {allowNameEdit ? (
+        <dialog className="account-dialog" ref={editDialogRef}>
+          <form className="dialog-form" onSubmit={handleEditSubmit}>
+            <input name="userId" type="hidden" value={userId} />
+            <div className="dialog-heading">
+              <h2>编辑账号</h2>
+              <p>登录用户名不可修改。</p>
+            </div>
+            <label>
+              登录用户名
+              <input disabled value={username} />
+            </label>
+            <label>
+              账号名称
+              <input defaultValue={name} name="name" required />
+            </label>
+            {editState.error ? (
+              <p className="form-error">{editState.error}</p>
+            ) : null}
+            <div className="dialog-actions">
+              <button
+                className="secondary-button"
+                onClick={() => editDialogRef.current?.close()}
+                type="button"
+              >
+                取消
+              </button>
+              <button disabled={isEditPending} type="submit">
+                {isEditPending ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      ) : null}
 
       <dialog className="account-dialog" ref={passwordDialogRef}>
         <form className="dialog-form" onSubmit={handlePasswordSubmit}>

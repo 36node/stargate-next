@@ -1,5 +1,7 @@
 "use server";
 
+import { StargateApiError } from "@repo/stargate-next-sdk";
+
 import { signIn } from "../../../stargate";
 
 export type LoginState = { error?: string };
@@ -14,12 +16,31 @@ function isRedirect(error: unknown): boolean {
   );
 }
 
+function loginErrorMessage(error: unknown): string {
+  if (!(error instanceof StargateApiError)) {
+    return "登录失败，请检查账号、密码和 Stargate 配置。";
+  }
+
+  switch (error.code) {
+    case "CAPTCHA_INVALID":
+      return "验证码错误或已过期，请刷新后重试。";
+    case "LOGIN_LOCKED":
+      return "登录尝试过多，请稍后再试。";
+    case "LOGIN_INVALID":
+      return "账号或密码错误。";
+    default:
+      return "登录失败，请稍后重试。";
+  }
+}
+
 export async function loginAction(
   _state: LoginState,
   formData: FormData
 ): Promise<LoginState> {
   const login = formData.get("login");
   const password = formData.get("password");
+  const captchaId = formData.get("captchaId");
+  const captchaCode = formData.get("captchaCode");
   const from = formData.get("from");
 
   if (typeof login !== "string" || typeof password !== "string") {
@@ -28,7 +49,12 @@ export async function loginAction(
 
   try {
     await signIn(
-      { login, password },
+      {
+        captchaCode: typeof captchaCode === "string" ? captchaCode : undefined,
+        captchaId: typeof captchaId === "string" ? captchaId : undefined,
+        login,
+        password,
+      },
       { from: typeof from === "string" && from.startsWith("/") ? from : "/" }
     );
   } catch (error) {
@@ -36,7 +62,7 @@ export async function loginAction(
       throw error;
     }
 
-    return { error: "登录失败，请检查账号、密码和 Stargate 配置。" };
+    return { error: loginErrorMessage(error) };
   }
 
   return { error: "登录未完成，请重试。" };

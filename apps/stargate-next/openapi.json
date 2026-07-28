@@ -1,0 +1,503 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Stargate Next API",
+    "version": "1.0.0",
+    "description": "Authentication and account identity API. Account and session management operations require x-api-key."
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "live",
+        "responses": { "200": { "description": "live" } }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready",
+        "responses": {
+          "200": { "description": "ready" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/captchas": {
+      "post": {
+        "operationId": "createCaptcha",
+        "responses": {
+          "201": { "$ref": "#/components/responses/Captcha" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/captchas/verify": {
+      "post": {
+        "operationId": "verifyCaptcha",
+        "requestBody": { "$ref": "#/components/requestBodies/VerifyCaptcha" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/CaptchaVerification" }
+        }
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": { "$ref": "#/components/requestBodies/Login" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/AuthTokens" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "operationId": "refresh",
+        "requestBody": { "$ref": "#/components/requestBodies/Refresh" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/AuthTokens" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "security": [{ "bearerAccessToken": [] }],
+        "responses": { "204": { "description": "session removed" } }
+      }
+    },
+    "/v1/accounts": {
+      "get": {
+        "operationId": "listAccounts",
+        "security": [{ "serviceApiKey": [] }],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page[offset]",
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "in": "query",
+            "name": "page[limit]",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/AccountCollection" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "createAccount",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/CreateAccount" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Account" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/accounts/{accountId}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "accountId",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "operationId": "getAccount",
+        "security": [{ "serviceApiKey": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Account" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "operationId": "patchAccount",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/PatchAccount" },
+        "responses": { "200": { "$ref": "#/components/responses/Account" } }
+      },
+      "delete": {
+        "operationId": "deleteAccount",
+        "security": [{ "serviceApiKey": [] }],
+        "responses": { "204": { "description": "account deleted" } }
+      }
+    },
+    "/v1/accounts/@batchGet": {
+      "post": {
+        "operationId": "batchGetAccounts",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/BatchGetAccounts"
+        },
+        "responses": {
+          "200": {
+            "description": "Accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Account" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/accounts/{accountId}/password": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "accountId",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "post": {
+        "operationId": "changePassword",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/ChangePassword" },
+        "responses": { "204": { "description": "password changed" } }
+      }
+    },
+    "/v1/accounts/{accountId}/sessions": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "accountId",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "operationId": "listSessions",
+        "security": [{ "serviceApiKey": [] }],
+        "responses": { "200": { "$ref": "#/components/responses/Sessions" } }
+      },
+      "delete": {
+        "operationId": "revokeSessions",
+        "security": [{ "serviceApiKey": [] }],
+        "parameters": [
+          { "in": "query", "name": "sessionId", "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "sessions removed" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      },
+      "bearerAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "requestBodies": {
+      "Login": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/LoginInput" }
+          }
+        }
+      },
+      "Refresh": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/RefreshInput" }
+          }
+        }
+      },
+      "VerifyCaptcha": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/VerifyCaptchaInput" }
+          }
+        }
+      },
+      "CreateAccount": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/CreateAccountInput" }
+          }
+        }
+      },
+      "PatchAccount": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/PatchAccountInput" }
+          }
+        }
+      },
+      "BatchGetAccounts": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/BatchGetAccountsInput" }
+          }
+        }
+      },
+      "ChangePassword": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ChangePasswordInput" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "LoginInput": {
+        "type": "object",
+        "required": ["login", "password", "captchaId", "captchaCode"],
+        "properties": {
+          "login": { "type": "string" },
+          "password": { "type": "string", "writeOnly": true },
+          "captchaId": { "type": "string" },
+          "captchaCode": {
+            "type": "string",
+            "description": "Four characters from the case-insensitive captcha alphabet.",
+            "pattern": "^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$",
+            "writeOnly": true
+          }
+        }
+      },
+      "RefreshInput": {
+        "type": "object",
+        "required": ["refreshKey"],
+        "properties": { "refreshKey": { "type": "string", "writeOnly": true } }
+      },
+      "VerifyCaptchaInput": {
+        "type": "object",
+        "required": ["id", "code"],
+        "properties": {
+          "id": { "type": "string" },
+          "code": {
+            "type": "string",
+            "description": "Four characters from the case-insensitive captcha alphabet.",
+            "pattern": "^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$",
+            "writeOnly": true
+          }
+        }
+      },
+      "CreateAccountInput": {
+        "type": "object",
+        "required": ["username", "password", "idempotencyKey"],
+        "properties": {
+          "username": { "type": "string" },
+          "phone": { "type": ["string", "null"] },
+          "email": { "type": ["string", "null"], "format": "email" },
+          "password": { "type": "string", "writeOnly": true },
+          "active": { "type": "boolean" },
+          "idempotencyKey": { "type": "string" }
+        }
+      },
+      "PatchAccountInput": {
+        "type": "object",
+        "properties": {
+          "username": { "type": "string" },
+          "phone": { "type": ["string", "null"] },
+          "email": { "type": ["string", "null"], "format": "email" },
+          "active": { "type": "boolean" }
+        }
+      },
+      "BatchGetAccountsInput": {
+        "type": "object",
+        "required": ["accountIds"],
+        "properties": {
+          "accountIds": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ChangePasswordInput": {
+        "type": "object",
+        "required": ["password"],
+        "properties": { "password": { "type": "string", "writeOnly": true } }
+      },
+      "AuthTokens": {
+        "type": "object",
+        "required": [
+          "accessToken",
+          "accessTokenExpiresAt",
+          "accountId",
+          "refreshExpiresAt",
+          "refreshKey",
+          "sessionId"
+        ],
+        "properties": {
+          "accessToken": { "type": "string" },
+          "accessTokenExpiresAt": { "type": "string", "format": "date-time" },
+          "accountId": { "type": "string" },
+          "refreshExpiresAt": { "type": "string", "format": "date-time" },
+          "refreshKey": { "type": "string", "writeOnly": true },
+          "sessionId": { "type": "string" }
+        }
+      },
+      "CaptchaVerification": {
+        "type": "object",
+        "required": ["verified"],
+        "properties": { "verified": { "type": "boolean" } }
+      },
+      "Session": {
+        "type": "object",
+        "required": ["id", "expiresAt", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": ["id", "username", "active", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "username": { "type": "string" },
+          "phone": { "type": ["string", "null"] },
+          "email": { "type": ["string", "null"], "format": "email" },
+          "active": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AccountCollection": {
+        "type": "object",
+        "required": ["data", "links", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "id", "attributes"],
+              "properties": {
+                "type": { "const": "accounts" },
+                "id": { "type": "string" },
+                "attributes": { "$ref": "#/components/schemas/Account" }
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": ["self"],
+            "properties": {
+              "self": { "type": "string" },
+              "next": { "type": "string" }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "object",
+                "properties": {
+                  "offset": { "type": "integer" },
+                  "limit": { "type": "integer" },
+                  "total": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Captcha": {
+        "description": "Captcha challenge",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["id", "imageDataUri"],
+              "properties": {
+                "id": { "type": "string" },
+                "imageDataUri": { "type": "string", "format": "uri" },
+                "testCode": {
+                  "type": "string",
+                  "pattern": "^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$",
+                  "description": "Only returned when CAPTCHA_TEST_MODE=true."
+                }
+              }
+            }
+          }
+        }
+      },
+      "Account": {
+        "description": "Account",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Account" }
+          }
+        }
+      },
+      "AuthTokens": {
+        "description": "Access and refresh credentials",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AuthTokens" }
+          }
+        }
+      },
+      "CaptchaVerification": {
+        "description": "Captcha verification result",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/CaptchaVerification" }
+          }
+        }
+      },
+      "Sessions": {
+        "description": "Active sessions",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/Session" }
+            }
+          }
+        }
+      },
+      "AccountCollection": {
+        "description": "JSON:API account collection",
+        "content": {
+          "application/vnd.api+json": {
+            "schema": { "$ref": "#/components/schemas/AccountCollection" }
+          },
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AccountCollection" }
+          }
+        }
+      },
+      "Json": {
+        "description": "JSON response",
+        "content": { "application/json": { "schema": { "type": "object" } } }
+      },
+      "Error": {
+        "description": "Stable error response: { statusCode, code, message }",
+        "content": {
+          "application/json": {
+            "schema": { "type": "object", "required": ["code", "message"] }
+          }
+        }
+      },
+      "Unavailable": { "description": "Dependency readiness failed" }
+    }
+  }
+}

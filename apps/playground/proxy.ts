@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { loadSession } from "./stargate";
 
-const publicPaths = ["/sign-in", "/health"];
+const publicPaths = ["/api/captcha", "/sign-in", "/health"];
 
 function isPublicPath(pathname: string): boolean {
   return publicPaths.some(

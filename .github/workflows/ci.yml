@@ -50,18 +50,48 @@ jobs:
           fetch-depth: 0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Push database schema
-        run: pnpm db:migrate
+      - name: Deploy database migrations
+        run: |
+          pnpm db:migrate
+          pnpm db:migrate
+          pnpm --filter stargate-next seed:legacy-fixture
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
       - name: Code check
         run: pnpm check
+      - name: Verify OpenAPI SDK snapshot
+        run: |
+          pnpm sdk:generate
+          git diff --exit-code -- packages/stargate-next-sdk/src
       - name: Typecheck
         run: pnpm typecheck
       - name: Test
         run: pnpm test
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+      - name: Run Stargate Next black-box tests
+        run: |
+          pnpm --filter stargate-next build
+          pnpm --filter stargate-next start > /tmp/stargate-next.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl --fail http://127.0.0.1:9527/health/ready && break
+            sleep 1
+          done
+          curl --fail http://127.0.0.1:9527/health/ready
+          pnpm --filter stargate-next test:api
+          pnpm --filter stargate-next test:sdk
+        env:
+          ACCESS_TOKEN_TTL_SECONDS: "3600"
+          CAPTCHA_HMAC_SECRET: ci-captcha-hmac-secret
+          CAPTCHA_TEST_MODE: "true"
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+          STARGATE_JWT_SECRET: ci-jwt-secret
+          REDIS_URL: redis://localhost:6379
+          REDIS_KEY_PREFIX: stargate-next:ci-${{ github.run_id }}:
+          REFRESH_KEY_HMAC_PRIMARY_KEY_ID: ci-primary
+          REFRESH_KEY_HMAC_PRIMARY_SECRET: ci-primary-secret
+          STARGATE_API_KEY: ci-service-api-key
+          STARGATE_BASE_URL: http://127.0.0.1:9527
 
   docker:
     if: github.actor != 'dependabot[bot]'

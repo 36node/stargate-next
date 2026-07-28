@@ -16,7 +16,7 @@
 
 ### 1.2 非目标
 
-- 不在 `auth-next` 中承载头像、等级、邀请、积分、业务标签等完整 Profile。
+- 不在 `stargate-next` 中承载头像、等级、邀请、积分、业务标签等完整 Profile。
 - 不承载 Namespace 业务组织主数据和复杂资源授权。
 - 不提供通用短信/邮件网关及消息正文管理。
 - 不提供行业/地区字典、用户聚合报表和全库清空接口。
@@ -78,7 +78,7 @@
 .
 ├── apps/
 │   ├── auth/                       # 旧 Auth，不运行、不发布、仅作为参考
-│   ├── auth-next/                  # 新 Auth
+│   ├── stargate-next/              # 新 Auth
 │   │   ├── src/
 │   │   │   ├── bootstrap/
 │   │   │   ├── platform/
@@ -89,8 +89,8 @@
 │   │   └── test/
 │   └── playground/                 # 测试 RP、登录 UI、Token/Session 调试
 ├── packages/
-│   ├── auth-contracts/             # 错误码、公共类型、OpenAPI 快照；不放业务实现
-│   ├── auth-next-sdk/              # 从 auth-next OpenAPI 自动生成
+│   ├── stargate-contracts/         # 错误码、公共类型、OpenAPI 快照；不放业务实现
+│   ├── stargate-next-sdk/          # 从 stargate-next OpenAPI 自动生成
 │   ├── config/                     # monorepo 配置加载和校验
 │   ├── eslint-config/
 │   └── typescript-config/
@@ -101,12 +101,12 @@
 
 约束：
 
-- `apps/auth-next` 不 import `apps/auth` 的源码。
+- `apps/stargate-next` 不 import `apps/auth` 的源码。
 - 旧实现只作为行为参考和回归基线；可复用的仅是经过重新定义的契约和测试用例。
 - 不为了“复用”过早把领域模块移动到 `packages`。只有两个以上应用真正共同使用的稳定代码才抽包。
-- `apps/playground` 必须通过生成的 `packages/auth-next-sdk` 调用，不手写与实现耦合的 HTTP 请求。
+- `apps/playground` 必须通过生成的 `packages/stargate-next-sdk` 调用 `stargate-next`，不手写与实现耦合的 HTTP 请求。
 
-## 4. `auth-next` 模块划分
+## 4. `stargate-next` 模块划分
 
 ### 4.1 PlatformModule
 
@@ -149,8 +149,9 @@
 Auth 拥有字段：
 
 - `id/sub`
-- `username/email/phone` 及 normalized/verified 状态
-- `active/status/type/expireAt`
+- 写入前规范化并直接唯一的 `username/email/phone`
+- 当前密码的 algorithm、hash、salt、changedAt
+- `active/status/type`
 - 安全时间戳
 
 不拥有：
@@ -162,13 +163,13 @@ Auth 拥有字段：
 功能：
 
 - 密码创建、验证、修改、重置和凭证版本。
-- Argon2id 参数治理、泄露密码/密码策略扩展点。
+- MVP 沿用 salted MD5；Argon2id 参数治理和渐进升级进入 Post-MVP。
 - 旧 MD5 verifier 与登录成功 rehash。
 - 改密后按策略撤销旧 Session。
 
 主要数据：
 
-- `password_credentials`
+- 当前密码字段直接存于 `accounts`
 - `credential_history`（确有策略需求后再启用）
 
 ### 4.5 VerificationModule
@@ -207,7 +208,7 @@ API 原则：
 原则：
 
 - 登录方式与 MFA factor 分开建模。
-- 所有方式统一处理 active/expireAt/client/audience。
+- 所有方式统一处理 active/client/audience。
 - 自动注册必须由 Client policy 显式允许。
 
 ### 4.7 FederationModule
@@ -360,9 +361,7 @@ Post-MVP：
 
 | 数据 | Owner | 说明 |
 | --- | --- | --- |
-| accounts | AccountModule | 稳定主体与状态。 |
-| account_identifiers | AccountModule | username/email/phone、normalized、verified、唯一约束。 |
-| password_credentials | CredentialModule | Argon2id/legacy hash、algorithm、changedAt、version。 |
+| accounts | AccountModule/CredentialModule | 稳定主体、状态、写入前规范化并直接唯一的 username/email/phone，以及当前 salted MD5 hash、algorithm、changedAt。 |
 | external_identities | FederationModule | provider subject 与 account 映射。 |
 | clients/client_credentials | ClientModule | 应用和服务身份。 |
 | sessions/refresh_tokens | SessionModule | subjectType、client、family、hash、revoke。 |
@@ -399,6 +398,8 @@ Post-MVP 再增加 OIDC Authorization Code + PKCE、Hosted Login 和标准 RP �
 
 - Playground 不保存 client secret 到浏览器。
 - 只允许连接明确标记的开发/测试环境。
+- PostgreSQL 仅供 `stargate-next` 的账户、凭证、Session、审计和其他认证域数据使用；Playground 不创建或写入 PostgreSQL schema。
+- Playground 的短期模拟和验收数据只使用进程内内存或 Redis，必须支持 TTL 或显式 reset，不作为长期事实来源或迁移目标。
 - Playwright 覆盖关键浏览器流程。
 - 测试验证码通过 test-only mailbox/provider 获取，不从生产 API 响应读取。
 
@@ -424,7 +425,7 @@ Post-MVP 再增加 OIDC Authorization Code + PKCE、Hosted Login 和标准 RP �
 负责：
 
 - Account、identifier、账户状态。
-- Argon2id、旧密码兼容、改密和重置。
+- salted MD5 兼容、改密和重置；Argon2id 后移。
 - Account/Profile 字段边界和账户数据迁移。
 
 主要交付：AccountModule、CredentialModule。建议 1 人，Account schema 由该工作流单一 Owner 审核。
@@ -538,7 +539,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 
 1. 将现有应用原样移动到 `apps/auth`，保证 build/test/docker 行为不变。
 2. 建立 pnpm workspace、共享 TypeScript/ESLint 配置。
-3. 创建 `apps/auth-next`、`apps/playground` 空壳。
+3. 创建 `apps/stargate-next`、`apps/playground` 空壳。
 4. 保存旧 OpenAPI、错误码、JWT claims 和关键响应 fixture。
 5. 先整理 Mekong 关键调用和 e2e fixture，再补 Adventurer、Haivivi legacy 兼容矩阵。
 
@@ -579,7 +580,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 
 验收：
 
-- 新账户使用 Argon2id。
+- 新账户暂时使用 salted MD5。
 - 旧 MD5 账户可登录并自动升级 hash。
 - Refresh rotation/reuse detection、改密撤销、禁用账号立即阻止 refresh。
 - Access Token 包含标准 `iss/aud/sub/client_id/scope`。
@@ -608,8 +609,8 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 
 1. 实现已确认使用的 login/register/user/password/captcha/session 路由。
 2. 保持 SDK 需要的 DTO、错误码和响应字段。
-3. 生成 `packages/auth-next-sdk`。
-4. 对旧 Auth 和 auth-next 运行同一套 characterization tests。
+3. 生成 `packages/stargate-next-sdk`。
+4. 对旧 Auth 和 stargate-next 运行同一套 characterization tests。
 
 验收：
 
@@ -641,7 +642,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 2. 将 Namespace/Group 依赖隔离到 LegacyClaimsProvider，MVP 不迁移其数据和业务规则。
 3. 身份短信/邮件切换到 purpose 化 Notification。
 4. 确认 KYC owner。
-5. auth-next 不实现字典、报表、消息记录和未使用原始 CRUD；旧接口等调用量归零后再删除。
+5. stargate-next 不实现字典、报表、消息记录和未使用原始 CRUD；旧接口等调用量归零后再删除。
 
 验收：
 
@@ -658,7 +659,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 2. 在预发布环境使用生产规模脱敏数据完成 MongoDB → PostgreSQL 全量迁移、约束冲突处理、对账和回滚演练。
 3. 进入维护窗口，停止旧 Auth 写入和 Token/Session 签发。
 4. 执行最终 MongoDB → PostgreSQL 数据迁移，并对账 username/email/phone/identity、Session 和设备引用。
-5. 部署 auth-next，同时切换 Mekong、Adventurer、Haivivi Admin/API/Device 和旧 SDK 的路由与配置。
+5. 部署 stargate-next，同时切换 Mekong、Adventurer、Haivivi Admin/API/Device 和旧 SDK 的路由与配置。
 6. 执行人员登录、OTP、refresh/logout、设备 UAT/MQTT、KYC 和第三方登录 smoke test。
 7. 验收失败则在维护窗口内整体回滚应用、路由和数据；禁止新旧服务混合承接流量。
 8. 验收通过后开放流量，旧 Auth 保持停止状态，仅作为限时回滚备份。
@@ -686,7 +687,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 并行开发规则：
 
 - 每条工作流按模块目录负责 domain、repository、application service 和测试，避免按 Controller/Service/Repository 横向拆给不同人员。
-- 共享接口先进入 `auth-contracts` 或模块公开 port，再由其他工作流基于 Fake 开发。
+- 共享接口先进入 `stargate-contracts` 或模块公开 port，再由其他工作流基于 Fake 开发。
 - 使用短分支和 feature flag，持续合并主干，不维护长期“平台分支”“登录分支”。
 - 每个 PR 只跨一个主要模块；跨模块契约变更必须由双方 Owner 共同审核。
 - Wave 结束执行集成门禁；未通过时停止扩大新功能范围，优先修复契约和兼容问题。
@@ -720,7 +721,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 - OpenAPI breaking-change 检查。
 - migration up/down 和空库/存量库测试。
 - secret scan、dependency audit、容器漏洞扫描。
-- Auth-next 不得 import legacy app 源码的边界检查。
+- stargate-next 不得 import legacy app 源码的边界检查。
 
 ## 9. Post-MVP 路线
 
@@ -764,11 +765,11 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 建议第一个可评审里程碑只包含：
 
 1. Monorepo 目录调整，旧 Auth 行为不变。
-2. `auth-next` Platform、Client、Account、Credential、Session、Token、Audit 骨架。
+2. `stargate-next` Platform、Client、Account、Credential、Session、Token、Audit 骨架。
 3. PostgreSQL/Redis 本地开发环境，以及 MongoDB 迁移源 fixture。
 4. 密码登录、refresh、logout、JWKS。
 5. Playground 密码登录和 Token 查看。
-6. 旧 MD5 → Argon2id 渐进迁移测试。
+6. Post-MVP 增加旧 MD5 → Argon2id 渐进迁移测试。
 7. OpenAPI、SDK 生成和最小 CI。
 
 OTP、极光、现有 OAuth/KYC 兼容和设备 Token 在骨架验证后按 Phase 3～5 进入；完整 OIDC 仅在 MVP 整体上线并稳定运行后进入 Post-MVP。

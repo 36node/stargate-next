@@ -1,5 +1,5 @@
 {
-  "name": "@repo/auth-next-sdk",
+  "name": "@repo/stargate-next-sdk",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,10 +9,14 @@
   "scripts": {
     "build": "tsc --noEmit",
     "build:ci": "tsc --noEmit",
+    "generate": "openapi-typescript ../../apps/stargate-next/openapi.json -o src/openapi.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.17.0"
   }
 }

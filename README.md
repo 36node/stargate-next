@@ -10,8 +10,8 @@ Stargate Next 是一个基于 pnpm 与 Turborepo 的 Monorepo，用于承载下�
 
 ## 包
 
-- `packages/auth-next-sdk`：为 Stargate Next OpenAPI 契约生成 API 绑定预留的占位包。
-- `packages/db`：仅包含 `Example` 模型的共享 Prisma Client。
+- `packages/stargate-next-sdk`：由 `apps/stargate-next/openapi.json` 生成的 Stargate Next API 绑定。
+- `packages/db`：Stargate Next 认证域的 Prisma Client 与 migration。
 - `packages/next-stargate`：旧 Stargate 的 Next.js 会话、JWT 验证和 Cookie 集成。
 
 ## 前置条件
@@ -39,7 +39,7 @@ pnpm db:migrate
 pnpm --filter stargate-next dev
 ```
 
-它使用以下环境变量：
+复制 `apps/stargate-next/env.example` 到根 `.env` 后填入独立密钥。除数据库与 Redis 地址外，`STARGATE_API_KEY`、`STARGATE_JWT_SECRET`、`CAPTCHA_HMAC_SECRET` 和 refresh HMAC primary 配置均为必填；secondary key 用于无停机轮换，必须同时提供 ID 和 secret。
 
 ```dotenv
 DATABASE_URL=postgresql://postgres:123456@localhost:5432/stargate-next-local?schema=public
@@ -48,6 +48,38 @@ PORT=9527
 ```
 
 `/health/live` 只检查进程存活；`/health/ready` 会检查 PostgreSQL 与 Redis。
+
+Account 与 Session 管理接口要求 `x-api-key`；Captcha、login、refresh 与 logout 不要求服务 API Key。`apps/stargate-next/openapi.json` 是公开 API 的契约来源，`packages/stargate-next-sdk` 仅导出从该契约生成的 client。
+
+## 初始化 Stargate Next 账户
+
+执行迁移后运行：
+
+```bash
+pnpm seed
+```
+
+该命令会幂等地创建或恢复 `stargate` 账户，默认密码为 `stargate@36node`。
+
+## 黑盒验收
+
+迁移必须在黑盒测试前由开发者或 CI 单独执行。测试不会创建 schema 或调用 migration：
+
+```bash
+DATABASE_URL=postgresql://postgres:123456@localhost:5432/stargate-next-blackbox pnpm db:migrate
+PORT=9530 STARGATE_BASE_URL=http://127.0.0.1:9530 \
+STARGATE_API_KEY=local-service-api-key STARGATE_JWT_SECRET=local-jwt-secret CAPTCHA_HMAC_SECRET=local-captcha-hmac-secret \
+REFRESH_KEY_HMAC_PRIMARY_KEY_ID=primary-2026 \
+REFRESH_KEY_HMAC_PRIMARY_SECRET=local-refresh-primary-secret \
+CAPTCHA_TEST_MODE=true REDIS_KEY_PREFIX=stargate-next:blackbox: \
+pnpm --filter stargate-next dev
+
+STARGATE_BASE_URL=http://127.0.0.1:9530 \
+STARGATE_API_KEY=local-service-api-key \
+pnpm --filter stargate-next test:api
+```
+
+使用相同环境变量执行 `pnpm --filter stargate-next test:sdk` 验证生成 SDK。`seed:legacy-fixture` 仅应在 migration 后、测试服务启动前执行。
 
 ## 启动旧 Stargate
 

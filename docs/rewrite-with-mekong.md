@@ -8,7 +8,7 @@
 
 1. 将 Auth 仍应拥有的账户、凭证和 Session 数据迁移到 Auth PostgreSQL。
 2. 将 User Profile、Namespace/组织树、角色和业务权限迁移到 Mekong PostgreSQL。
-3. 调整 Mekong 内部调用，使其只向 `auth-next` 请求身份认证能力。
+3. 调整 Mekong 内部调用，使其只向 `stargate-next` 请求身份认证能力。
 4. 保持 Mekong 用户可登录、可管理账号、可管理组织、可执行原有权限控制。
 5. 在维护窗口内整体切换，不做新旧接口长期兼容或双写。
 
@@ -34,13 +34,13 @@ PostgreSQL 迁移仍是 MVP 主目标；职责拆分不是顺带删除接口，�
 
 ### 1.3 Monorepo 目录结构
 
-Auth 侧使用 pnpm workspace，把旧 Auth 代码作为参考材料保留在仓库中；可运行、可测试、可发布的目标只包含 `auth-next`、Playground 和稳定契约：
+Auth 侧使用 pnpm workspace，把旧 Auth 代码作为参考材料保留在仓库中；可运行、可测试、可发布的目标只包含 `stargate-next`、Playground 和稳定契约：
 
 ```text
 auth/
 ├── apps/
 │   ├── auth/                       # 旧 Auth 参考代码；不运行、不发布、不作为 CI 目标
-│   ├── auth-next/                  # 新 Auth；只负责账户、凭证、Session 和安全基础
+│   ├── stargate-next/              # 新 Auth；只负责账户、凭证、Session 和安全基础
 │   │   ├── src/
 │   │   │   ├── bootstrap/
 │   │   │   ├── platform/
@@ -51,8 +51,8 @@ auth/
 │   │   └── test/
 │   └── playground/                 # Next.js App Router 测试 RP、登录 UI、Token/Session 调试
 ├── packages/
-│   ├── auth-contracts/             # 错误码、公共类型、OpenAPI 快照；不放业务实现
-│   ├── auth-next-sdk/              # 从 auth-next OpenAPI 生成，供 playground 和 Mekong 调用
+│   ├── stargate-contracts/         # 错误码、公共类型、OpenAPI 快照；不放业务实现
+│   ├── stargate-next-sdk/          # 从 stargate-next OpenAPI 生成，供 playground 和 Mekong 调用
 │   ├── config/                     # 仅放跨 app 共享的配置加载和校验
 │   ├── eslint-config/
 │   └── typescript-config/
@@ -74,28 +74,30 @@ mekong-next/
 │   ├── db/                         # Mekong PostgreSQL schema 和 migration
 │   ├── next-stargate/              # slim session/JWT 处理，不承载业务授权
 │   └── services/
-│       ├── auth/                   # 收缩为 auth-next client
+│       ├── auth/                   # 收缩为 stargate-next client
 │       └── mekong/                 # Profile、Organization、授权和账号编排
 └── tests/
 ```
 
 约束：
 
-- `apps/auth-next` 不 import `apps/auth` 的源码；旧实现只作为阅读参考和契约对照资料。
+- `apps/stargate-next` 不 import `apps/auth` 的源码；旧实现只作为阅读参考和契约对照资料。
 - `apps/auth` 不提供启动、发布或部署目标，不进入 CI build/test 矩阵。
-- `apps/playground` 必须通过生成的 `packages/auth-next-sdk` 调用 `auth-next`，不得手写与实现耦合的 HTTP 请求。
+- `apps/playground` 必须通过生成的 `packages/stargate-next-sdk` 调用 `stargate-next`，不得手写与实现耦合的 HTTP 请求。
+- Auth monorepo 的 PostgreSQL 只供 `stargate-next` 使用，不承载 Playground 的 Mekong 模拟数据。
+- Playground 的短期 Profile、Organization、Role、Permission 模拟数据只使用进程内内存或 Redis，支持测试 reset/TTL，不创建 PostgreSQL schema。
 - 不为了“复用”过早把领域模块移动到 `packages`；只有两个以上应用真正共同使用的稳定代码才抽包。
 - Mekong Profile、Organization、roles 和业务权限只放在 `mekong-next`，不进入 Auth monorepo。
-- `mekong-next/packages/services/auth` 也应通过生成 client 或明确的内部 client 调用 `auth-next`，不得依赖 Auth 实现源码。
+- `mekong-next/packages/services/auth` 也应通过生成 client 或明确的内部 client 调用 `stargate-next`，不得依赖 Auth 实现源码。
 - `apps/bus-admin-web`、`apps/cpo-sandbox` 和 `apps/xingxing-robot` 通过同一套 `packages/services/auth` 与 `packages/next-stargate` 接入新 Auth。
 - `apps/mekong-api` 只保留必要下线期处理，不作为新 Auth consumer。
 
 ### 1.4 关键原则
 
 - 不以旧 Auth 的 22 个 Mekong 接口作为新契约。
-- `auth-next` 不提供 User Profile 和 Namespace CRUD。
+- `stargate-next` 不提供 User Profile 和 Namespace CRUD。
 - Mekong 是 Profile、组织和业务授权的唯一事实来源。
-- `auth-next` 是账户状态、登录标识、密码和 Session 的唯一事实来源。
+- `stargate-next` 是账户状态、登录标识、密码和 Session 的唯一事实来源。
 - 两边通过稳定的 `accountId` 关联，不共享 ORM model。
 - JWT 不再携带 `ns`、`roles`、`permissions` 等 Mekong 业务数据。
 - 不长期双写同一字段；跨服务操作使用明确编排、幂等和补偿。
@@ -103,7 +105,7 @@ mekong-next/
 
 ## 2. 目标职责边界
 
-### 2.1 `auth-next` 负责
+### 2.1 `stargate-next` 负责
 
 账户主体：
 
@@ -182,7 +184,6 @@ Auth 独占：
 - username
 - password
 - active
-- expireAt
 - 登录失败状态
 - Session
 
@@ -207,8 +208,8 @@ phone/email 需要区分语义：
 
 1. Mekong 登录页请求 Captcha。
 2. 用户提交 login、password 和 Captcha。
-3. `auth-next` 验证 Captcha、账户状态和密码。
-4. `auth-next` 创建 Session，返回 Access Token 和 Refresh Key。
+3. `stargate-next` 验证 Captcha、账户状态和密码。
+4. `stargate-next` 创建 Session，返回 Access Token 和 Refresh Key。
 5. JWT 只包含身份和 Session 信息。
 6. Mekong 根据 `sub/accountId` 从本地 PostgreSQL 加载 Profile、组织和授权。
 7. Mekong 使用本地 `RoleToPermissions` 计算页面及业务权限。
@@ -228,9 +229,9 @@ phone/email 需要区分语义：
 
 ### 3.3 Refresh
 
-1. Mekong 将 Refresh Key 交给 `auth-next`。
-2. `auth-next` 检查账户状态和 Session。
-3. `auth-next` 返回新 Access Token，必要时轮换 Refresh Key。
+1. Mekong 将 Refresh Key 交给 `stargate-next`。
+2. `stargate-next` 检查账户状态和 Session。
+3. `stargate-next` 返回新 Access Token，MVP 保持原 Refresh Key 和 Session ID。
 4. Mekong 继续从本地数据库加载最新授权。
 
 因此角色或组织变更无需等待 Access Token 过期。
@@ -240,7 +241,7 @@ phone/email 需要区分语义：
 Mekong 是操作编排方：
 
 1. 生成稳定 `accountId`。
-2. 调用 `auth-next` 创建 Account 和初始 Credential。
+2. 调用 `stargate-next` 创建 Account 和初始 Credential。
 3. 在 Mekong 事务内创建 User Profile、Organization Membership 和 Role Assignment。
 4. 如果 Mekong 事务失败，调用幂等删除接口补偿 Auth Account。
 5. 如果补偿失败，记录 reconciliation item，禁止静默忽略孤儿 Account。
@@ -259,7 +260,7 @@ Profile 更新：
 
 账户更新：
 
-- username、active、expireAt 只写 Auth。
+- username、active 只写 Auth。
 
 密码修改：
 
@@ -282,7 +283,7 @@ MVP 默认优先软删除账户，避免业务历史记录失去 accountId。
 
 ## 4. 新接口契约
 
-接口可以调整，不继续生成旧 Auth 全量 SDK。建议为 `auth-next` 生成只包含身份能力的内部 client。
+接口可以调整，不继续生成旧 Auth 全量 SDK。建议为 `stargate-next` 生成只包含身份能力的内部 client。
 
 ### 4.1 健康检查
 
@@ -296,7 +297,6 @@ MVP 默认优先软删除账户，避免业务历史记录失去 accountId。
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
 - `POST /v1/auth/logout`
-- `GET /v1/sessions/by-key/{key}`
 - `GET /v1/accounts/{accountId}/sessions`
 - `DELETE /v1/accounts/{accountId}/sessions`
 
@@ -342,7 +342,6 @@ Account 创建字段：
 - 可选登录 phone/email
 - `password`
 - `active`
-- `expiresAt`
 - `idempotencyKey`
 
 Account 查询只返回身份字段，不返回 Profile 和业务授权。
@@ -504,47 +503,42 @@ MVP 可继续接受 Mekong 独立 `x-api-key`，但必须：
 
 - `id text primary key`
 - `status text not null`
-- `expires_at timestamptz null`
+- `username text not null`
+- `phone text null unique`
+- `email text null unique`
+- `password_algorithm text not null`
+- `password_hash text not null`
+- `password_changed_at timestamptz`
 - `created_at timestamptz`
 - `updated_at timestamptz`
 - `deleted_at timestamptz null`
 
-#### `account_identifiers`
-
-- `id`
-- `account_id`
-- `type`
-- `value`
-- `normalized_value`
-- `verified`
-
 约束：
 
-- `(type, normalized_value)` 唯一。
 - username 必须存在。
+- username 写入前统一执行 `trim().toLowerCase()`，数据库只保存规范化结果并直接对 username 建唯一约束。
 - phone/email 只在作为登录标识时迁入。
+- email 写入前 trim 并转为 lowercase。
+- phone 写入前 trim，且必须匹配 `^\+?\d+$`；不允许内部空格，不自动转换国家码或增删 `+`。
+- phone、email 直接建立唯一约束。
+- MVP 不做 phone/email 应用层字段加密；使用 PostgreSQL 静态加密、TLS、最小权限、加密备份和日志脱敏保护。
+- Account API 不返回 password hash/salt。
+- 通用 Account 更新不接受密码字段，改密使用专用接口。
 
-#### `password_credentials`
-
-- `account_id primary key`
-- `algorithm`
-- `password_hash`
-- `salt`
-- `changed_at`
-
-旧密码迁移为 `legacy-md5`；新建和改密使用 Argon2id。
+MVP 只支持 `legacy-md5` 格式；旧密码原样迁移，新建和改密继续生成 `13 位 salt + MD5(password + salt)`。Argon2id 进入 Post-MVP。
 
 #### `sessions`
 
 - `id primary key`
 - `account_id`
 - `refresh_key_hash`
-- `type`
+- `refresh_key_hmac_key_id`
 - `expires_at`
-- `revoked_at`
 - `created_at`
 
-不存储 Organization、Role、Permission 快照。
+不存储 Organization、Role、Permission 快照或撤销状态。logout/revoke 直接删除 Session，并写入 `auth_audit_events`。
+
+Refresh Key hash 使用 HMAC-SHA256。配置 primary 和可选 secondary `(keyId, secret)`：新 Session 只用 primary 生成 hash 并记录 key ID；验证时使用对应 `(keyId, hash)` 组合查询，任一组合匹配即可。`(refresh_key_hmac_key_id, refresh_key_hash)` 唯一，secondary 仅用于平滑轮换。
 
 #### `auth_audit_events`
 
@@ -629,7 +623,6 @@ Role 定义仍由 Mekong 代码维护，不迁移旧 Auth Role collection。
 - 用作登录标识的 phone/email
 - password/hash/salt
 - active
-- expireAt
 - passwordChangedAt
 
 迁入 Mekong PostgreSQL：
@@ -684,7 +677,7 @@ Auth 侧：
 
 - 重复或缺失 username。
 - 未知密码 hash。
-- active/expireAt 异常。
+- active 异常。
 - 登录 phone/email 冲突。
 
 Mekong 侧：
@@ -707,7 +700,7 @@ Mekong 侧：
 
 1. 冻结 Auth Account 与 Mekong Profile/Organization schema。
 2. 从 MongoDB 导出一致性快照。
-3. 迁移 Auth accounts、identifiers、credentials。
+3. 将登录标识和当前密码凭证合并迁移到 Auth accounts。
 4. 迁移 Mekong organizations。
 5. 迁移 Mekong profiles、memberships、roles、permissions。
 6. 验证跨库 accountId 和业务引用。
@@ -720,7 +713,7 @@ Mekong 侧：
 必须输出机器可读报告：
 
 - 源 User 数。
-- Auth Account/Credential 数。
+- Auth Account 数及密码算法分布。
 - Mekong Profile 数。
 - Namespace/Organization 数。
 - Membership、Role、Permission 数。
@@ -737,7 +730,7 @@ Mekong 侧：
 ### Workstream A：Auth Core
 
 - Auth PostgreSQL schema。
-- Account/Credential。
+- Account（包含登录标识和当前密码凭证）。
 - Login/Captcha。
 - Session/Refresh/Logout。
 - slim JWT。
@@ -805,7 +798,7 @@ Mekong 侧：
 
 并行交付：
 
-- Auth accounts/identifiers/credentials/sessions migration。
+- Auth accounts/sessions migration。
 - Mekong profiles/organizations/memberships/assignments migration。
 - Repository 和测试 fixture。
 - 预检与首次脱敏数据迁移。
@@ -877,7 +870,7 @@ Mekong 侧：
 2. 备份 MongoDB。
 3. 执行最终双目标迁移。
 4. 对账 Auth Account 与 Mekong Profile/Organization。
-5. 部署 `auth-next` 和 Mekong 改造。
+5. 部署 `stargate-next` 和 Mekong 改造。
 6. 更新 endpoint 和 Secret。
 7. 使所有旧 Session 失效。
 8. 执行 `bus-admin-web`、`cpo-sandbox`、`xingxing-robot` 登录、权限、用户、组织 smoke test。
@@ -889,9 +882,9 @@ Mekong 侧：
 ### 10.1 Auth
 
 - 正确/错误密码。
-- disabled/expired account。
+- disabled account。
 - legacy MD5 验证。
-- 新密码 Argon2id。
+- 新建和改密生成 salted MD5；Argon2id 不进入本阶段。
 - Refresh、logout、Session revoke。
 - Captcha 正确、错误、过期、重复消费。
 - 重复 username/phone 并发创建。
