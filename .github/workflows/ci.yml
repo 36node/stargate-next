@@ -12,11 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CYCLOPS_BASE_URL: ${{ secrets.CYCLOPS_BASE_URL }}
   HARBOR_DOMAIN: harbor.36node.com
-  HARBOR_PROJECT: 36node
-  IMAGE_REBUILD_TTL_DAYS: "7"
-  IMAGE_REBUILD_BRANCHES: "main,milestone/*,release/*"
+  HARBOR_PROJECT: stargate
 
 jobs:
   test:
@@ -138,7 +135,7 @@ jobs:
         id: meta-playground
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next-playground
+          images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -181,7 +178,7 @@ jobs:
           }
           targets=()
           plan_image "stargate-next" "stargate-next" "$STARGATE_NEXT_SHA" "$STARGATE_NEXT_META_TAGS" "stargate_next"
-          plan_image "playground" "stargate-next-playground" "$PLAYGROUND_SHA" "$PLAYGROUND_META_TAGS" "playground"
+          plan_image "playground" "playground" "$PLAYGROUND_SHA" "$PLAYGROUND_META_TAGS" "playground"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push cache misses
         if: steps.image-plan.outputs.bake_targets != ''
@@ -203,86 +200,12 @@ jobs:
             echo "| Application | Status | Image |"
             echo "| --- | --- | --- |"
             echo "| Stargate Next | \`${{ steps.image-plan.outputs.stargate_next_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next:${{ steps.meta-stargate-next.outputs.version }}\` |"
-            echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next-playground:${{ steps.meta-playground.outputs.version }}\` |"
+            echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground:${{ steps.meta-playground.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    needs: [test, docker]
-    if: ${{ github.actor != 'dependabot[bot]' && needs.test.result == 'success' && needs.docker.result == 'success' }}
-    runs-on: arc-runners-haivivi
-    timeout-minutes: 30
-    outputs:
-      deploy_name: ${{ steps.deploy-name.outputs.deploy_name }}
-      stargate_next_url: ${{ steps.urls.outputs.stargate_next_url }}
-      playground_url: ${{ steps.urls.outputs.playground_url }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-      - name: Extract environment overrides
-        id: pr-env
-        uses: ./.github/actions/pr-env
-        with:
-          text: "${{ github.event.pull_request.body }}"
-      - name: Resolve deployment name
-        id: deploy-name
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            deploy_name="pr-${{ github.event.pull_request.number }}"
-          elif [ "${{ github.ref_name }}" = "main" ]; then
-            deploy_name="uat"
-          else
-            deploy_name="$(echo "${{ github.ref_name }}" | tr '/' '-')"
-          fi
-          echo "deploy_name=$deploy_name" >> "$GITHUB_OUTPUT"
-      - name: Upsert application settings
-        env:
-          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
-          PR_ENV_JSON: ${{ steps.pr-env.outputs.env || '{}' }}
-          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          sed -e "s/{{deploy}}/${DEPLOY_NAME}/g" \
-              -e "s/{{deploy *| *uppercase}}/$(echo "$DEPLOY_NAME" | tr '[:lower:]' '[:upper:]')/g" \
-            .github/workflows/stargate-next-app-settings.json >/tmp/app-settings.json
-          jq --argjson envs "$PR_ENV_JSON" \
-            '.playbook.extraVars += ($envs | with_entries(.value = {default: .value, overridable: true}))' \
-            /tmp/app-settings.json >/tmp/app-settings.final.json
-          curl --fail-with-body -X PUT \
-            "$CYCLOPS_BASE_URL/api/settings/applications/stargate-next-${DEPLOY_NAME}" \
-            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/app-settings.final.json
-      - name: Deploy stage
-        env:
-          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
-          STARGATE_NEXT_TAG: ${{ needs.docker.outputs.stargate_next_image_tag }}
-          PLAYGROUND_TAG: ${{ needs.docker.outputs.playground_image_tag }}
-          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          app_id="stargate-next-${DEPLOY_NAME}"
-          token="$(curl --fail-with-body \
-            "$CYCLOPS_BASE_URL/api/settings/applications/${app_id}/hooks" \
-            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN" | jq -r '.token')"
-          jq -n --arg stargate "$STARGATE_NEXT_TAG" --arg playground "$PLAYGROUND_TAG" \
-            '{overrides: {stargate_next_tag: $stargate, stargate_next_playground_tag: $playground}}' \
-            >/tmp/deploy-overrides.json
-          curl --fail-with-body -X POST "$CYCLOPS_BASE_URL/api/hooks/${token}/deploy" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/deploy-overrides.json
-      - name: Build deployment URLs
-        id: urls
-        env:
-          DEPLOY_NAME: ${{ steps.deploy-name.outputs.deploy_name }}
-        run: |
-          echo "stargate_next_url=http://stargate-next.stargate-next-${DEPLOY_NAME}.36node.com" >> "$GITHUB_OUTPUT"
-          echo "playground_url=http://playground.stargate-next-${DEPLOY_NAME}.36node.com" >> "$GITHUB_OUTPUT"
-
   notify:
-    needs: [test, docker, deploy]
-    if: ${{ always() && github.actor != 'dependabot[bot]' && needs.test.result != 'cancelled' && needs.deploy.result != 'cancelled' }}
+    needs: [test, docker]
+    if: ${{ always() && github.actor != 'dependabot[bot]' && needs.test.result != 'cancelled' && needs.docker.result != 'cancelled' }}
     runs-on: arc-runners-haivivi
     steps:
       - uses: actions/checkout@v6
@@ -291,9 +214,6 @@ jobs:
         uses: ./.github/actions/ci-notify-content
         with:
           build_result: ${{ (needs.test.result == 'success' && needs.docker.result == 'success') && 'success' || 'failure' }}
-          deploy_result: ${{ needs.deploy.result }}
-          deploy_urls: >-
-            [{"name":"Stargate Next","url":"${{ needs.deploy.outputs.stargate_next_url }}"},{"name":"Playground","url":"${{ needs.deploy.outputs.playground_url }}"}]
           run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Send UAT notification
         if: ${{ github.event_name == 'push' }}
@@ -309,4 +229,4 @@ jobs:
         uses: thollander/actions-comment-pull-request@v3
         with:
           message: ${{ steps.notify.outputs.content }}
-          comment-tag: deploy-urls
+          comment-tag: ci-results

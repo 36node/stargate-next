@@ -11,7 +11,7 @@ permissions:
 
 env:
   HARBOR_DOMAIN: harbor.36node.com
-  HARBOR_PROJECT: 36node
+  HARBOR_PROJECT: stargate
 
 jobs:
   release-please:
@@ -83,7 +83,7 @@ jobs:
             targets+=("$target")
           }
           plan_image "stargate-next" "stargate-next" "stargate-next" "$STARGATE_NEXT_RELEASED" "$STARGATE_NEXT_TAG" "stargate_next_tags"
-          plan_image "playground" "stargate-next-playground" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
+          plan_image "playground" "playground" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push release images
         if: steps.image-plan.outputs.bake_targets != ''

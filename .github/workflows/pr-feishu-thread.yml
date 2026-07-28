@@ -52,4 +52,4 @@ jobs:
           message: |
             <!-- feishu_message_id: ${{ steps.create-thread.outputs.message_id }} -->
             ⏳ CI 运行中...
-          comment-tag: deploy-urls
+          comment-tag: ci-results
