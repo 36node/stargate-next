@@ -53,7 +53,6 @@ export type AuthTokens = {
 export type Captcha = {
   id: string;
   imageDataUri: string;
-  testCode?: string;
 };
 
 export type Session = {

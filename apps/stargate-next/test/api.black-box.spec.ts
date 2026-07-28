@@ -13,6 +13,7 @@ function env(name: string): string {
 
 const baseUrl = env("STARGATE_ENDPOINT");
 const apiKey = env("STARGATE_API_KEY");
+const captchaTestCode = env("CAPTCHA_TEST_CODE").trim().toUpperCase();
 
 async function request(
   path: string,
@@ -49,7 +50,7 @@ describe("Given a running Stargate Next service", () => {
     const captcha = await request("/v1/captchas", "POST");
     const login = await request("/v1/auth/login", "POST", {
       body: {
-        captchaCode: (captcha.body as { testCode: string }).testCode,
+        captchaCode: captchaTestCode,
         captchaId: (captcha.body as { id: string }).id,
         login: username,
         password,
@@ -130,12 +131,11 @@ describe("Given a running Stargate Next service", () => {
     expect((captcha.body as { imageDataUri: string }).imageDataUri).toMatch(
       CAPTCHA_IMAGE_PATTERN
     );
-    expect((captcha.body as { testCode: string }).testCode).toMatch(
-      CAPTCHA_CODE_PATTERN
-    );
+    expect(captcha.body).not.toHaveProperty("testCode");
+    expect(captchaTestCode).toMatch(CAPTCHA_CODE_PATTERN);
     const login = await request("/v1/auth/login", "POST", {
       body: {
-        captchaCode: (captcha.body as { testCode: string }).testCode,
+        captchaCode: captchaTestCode,
         captchaId: (captcha.body as { id: string }).id,
         login: `login${suffix}`,
         password: "password-123",
@@ -154,7 +154,7 @@ describe("Given a running Stargate Next service", () => {
 
     const reusedCaptcha = await request("/v1/auth/login", "POST", {
       body: {
-        captchaCode: (captcha.body as { testCode: string }).testCode,
+        captchaCode: captchaTestCode,
         captchaId: (captcha.body as { id: string }).id,
         login: `login${suffix}`,
         password: "password-123",
@@ -218,7 +218,7 @@ describe("Given a running Stargate Next service", () => {
     const captcha = await request("/v1/captchas", "POST");
     const login = await request("/v1/auth/login", "POST", {
       body: {
-        captchaCode: (captcha.body as { testCode: string }).testCode,
+        captchaCode: captchaTestCode,
         captchaId: (captcha.body as { id: string }).id,
         login: `password${suffix}`,
         password: "old-password",

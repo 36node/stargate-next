@@ -1,9 +1,12 @@
+const CAPTCHA_TEST_CODE_PATTERN = /^[A-Z0-9]{4}$/;
+
 export type StargateConfig = {
   apiKey: string;
   captchaAttempts: number;
   captchaCreateLimit: number;
   captchaCreateWindowSeconds: number;
   captchaHmacSecret: string;
+  captchaTestCode?: string;
   captchaTtlSeconds: number;
   jwtSecret: string;
   loginAttempts: number;
@@ -73,6 +76,14 @@ export function loadStargateConfig(
   if (testCaptcha && environment.NODE_ENV === "production") {
     throw new Error("CAPTCHA_TEST_MODE cannot be enabled in production");
   }
+  const captchaTestCode = testCaptcha
+    ? required(environment, "CAPTCHA_TEST_CODE").trim().toUpperCase()
+    : undefined;
+  if (captchaTestCode && !CAPTCHA_TEST_CODE_PATTERN.test(captchaTestCode)) {
+    throw new Error(
+      "CAPTCHA_TEST_CODE must contain exactly 4 ASCII letters or digits"
+    );
+  }
   return {
     apiKey: required(environment, "STARGATE_API_KEY"),
     captchaAttempts: positiveInteger(environment, "CAPTCHA_MAX_ATTEMPTS", "5"),
@@ -87,6 +98,7 @@ export function loadStargateConfig(
       "60"
     ),
     captchaHmacSecret: required(environment, "CAPTCHA_HMAC_SECRET"),
+    captchaTestCode,
     captchaTtlSeconds: positiveInteger(
       environment,
       "CAPTCHA_TTL_SECONDS",

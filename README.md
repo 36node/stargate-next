@@ -71,7 +71,8 @@ PORT=9530 STARGATE_ENDPOINT=http://127.0.0.1:9530 \
 STARGATE_API_KEY=local-service-api-key STARGATE_JWT_SECRET=local-jwt-secret CAPTCHA_HMAC_SECRET=local-captcha-hmac-secret \
 REFRESH_KEY_HMAC_PRIMARY_KEY_ID=primary-2026 \
 REFRESH_KEY_HMAC_PRIMARY_SECRET=local-refresh-primary-secret \
-CAPTCHA_TEST_MODE=true REDIS_KEY_PREFIX=stargate-next:blackbox: \
+CAPTCHA_TEST_MODE=true CAPTCHA_TEST_CODE=ABCD \
+REDIS_KEY_PREFIX=stargate-next:blackbox: \
 pnpm --filter stargate-next dev
 
 STARGATE_ENDPOINT=http://127.0.0.1:9530 \

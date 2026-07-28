@@ -20,8 +20,6 @@ PostgreSQL 迁移仍是 MVP 主目标；职责拆分不是顺带删除接口，�
 
 - 仓库：`mekong-next`
 - 应用：`apps/bus-admin-web`
-- 应用：`apps/cpo-sandbox`
-- 应用：`apps/xingxing-robot`
 - 当前 Auth 封装：`packages/services/auth`
 - 当前 Session 封装：`packages/next-stargate`
 - 目标业务服务：`packages/services/mekong`
@@ -49,7 +47,7 @@ auth/
 │   │   │   └── main.ts
 │   │   ├── migrations/
 │   │   └── test/
-│   └── playground/                 # Next.js App Router 测试 RP、登录 UI、Token/Session 调试
+│   └── playground/                 # Next.js App Router 测试用业务客户端、登录 UI、Token/Session 调试
 ├── packages/
 │   ├── stargate-contracts/         # 错误码、公共类型、OpenAPI 快照；不放业务实现
 │   ├── stargate-next-sdk/          # 从 stargate-next OpenAPI 生成，供 playground 和 Mekong 调用
@@ -67,8 +65,6 @@ Mekong 侧仍在 `mekong-next` 内改造现有业务包，不把 Mekong Profile/
 mekong-next/
 ├── apps/
 │   ├── bus-admin-web/              # 管理后台，首个纵向链路集成对象
-│   ├── cpo-sandbox/                # MVP 接入新 Auth
-│   ├── xingxing-robot/             # MVP 接入新 Auth
 │   └── mekong-api/                 # 弃用，不接入新 Auth
 ├── packages/
 │   ├── db/                         # Mekong PostgreSQL schema 和 migration
@@ -89,7 +85,7 @@ mekong-next/
 - 不为了“复用”过早把领域模块移动到 `packages`；只有两个以上应用真正共同使用的稳定代码才抽包。
 - Mekong Profile、Organization、roles 和业务权限只放在 `mekong-next`，不进入 Auth monorepo。
 - `mekong-next/packages/services/auth` 也应通过生成 client 或明确的内部 client 调用 `stargate-next`，不得依赖 Auth 实现源码。
-- `apps/bus-admin-web`、`apps/cpo-sandbox` 和 `apps/xingxing-robot` 通过同一套 `packages/services/auth` 与 `packages/next-stargate` 接入新 Auth。
+- `apps/bus-admin-web` 通过 `packages/services/auth` 与 `packages/next-stargate` 接入新 Auth。
 - `apps/mekong-api` 只保留必要下线期处理，不作为新 Auth consumer。
 
 ### 1.4 关键原则
@@ -469,13 +465,6 @@ MVP 可继续接受 Mekong 独立 `x-api-key`，但必须：
 - 登录 route：适配新 login response，并从 Mekong 加载用户上下文。
 - operation log：用户名称从 Mekong Profile 获取。
 
-`apps/cpo-sandbox` 和 `apps/xingxing-robot` 需要接入同一套新 Auth：
-
-- 替换旧 Auth endpoint、token/session 解析和刷新逻辑。
-- 使用 `packages/next-stargate` 的 slim session，不读取 `ns/roles/permissions` JWT claim。
-- 需要业务授权上下文时，通过 `packages/services/mekong` 按 accountId 加载。
-- 登录、刷新、退出和鉴权失败行为与 `bus-admin-web` 保持一致。
-
 `apps/mekong-api` 不做新 Auth 接入：
 
 - 标记为弃用，不再作为 MVP 兼容面。
@@ -750,8 +739,6 @@ Mekong 侧：
 - auth-service 收缩。
 - next-stargate slim session。
 - bus-admin-web layout/middleware/action。
-- cpo-sandbox 新 Auth 接入。
-- xingxing-robot 新 Auth 接入。
 - mekong-api 弃用路径和调用方迁移确认。
 - 业务模块 import 迁移。
 - Account orchestration。
@@ -780,7 +767,7 @@ Mekong 侧：
 
 交付：
 
-1. 确认 MVP 包含 `bus-admin-web`、`cpo-sandbox` 和 `xingxing-robot`。
+1. 确认 MVP 包含 `bus-admin-web`。
 2. 冻结 Auth/Mekong 字段 ownership。
 3. 冻结 slim Auth API。
 4. 冻结 JWT payload。
@@ -817,13 +804,11 @@ Mekong 侧：
 2. Mekong profile/authorization lookup。
 3. next-stargate slim session。
 4. bus-admin-web 登录和 layout。
-5. cpo-sandbox 登录、refresh 和权限上下文接入。
-6. xingxing-robot 登录、refresh 和权限上下文接入。
 
 退出条件：
 
 - `login → slim JWT → load profile → calculate permissions` 贯通。
-- 三个 MVP 应用都不再读取 JWT 里的 Mekong 业务 claim。
+- `bus-admin-web` 不再读取 JWT 里的 Mekong 业务 claim。
 - JWT 不包含 Mekong 业务 claim。
 - 角色和数据范围与旧系统一致。
 
@@ -838,7 +823,6 @@ Mekong 侧：
 - Account batch get。
 - Session revoke。
 - `bus-admin-web` 页面、server action 和 service import 改造。
-- `cpo-sandbox`、`xingxing-robot` 认证相关调用改造。
 
 退出条件：
 
@@ -873,7 +857,7 @@ Mekong 侧：
 5. 部署 `stargate-next` 和 Mekong 改造。
 6. 更新 endpoint 和 Secret。
 7. 使所有旧 Session 失效。
-8. 执行 `bus-admin-web`、`cpo-sandbox`、`xingxing-robot` 登录、权限、用户、组织 smoke test。
+8. 执行 `bus-admin-web` 登录、权限、用户、组织 smoke test。
 9. 验收后恢复流量。
 10. 切换前线上旧实例仅作为回滚保留，不从仓库重新运行或发布 `apps/auth`。
 
@@ -909,14 +893,12 @@ Mekong 侧：
 
 - `apps/bus-admin-web/tests/e2e/login-permission.spec.ts`
 - `apps/bus-admin-web/tests/e2e/org-*.spec.ts`
-- `apps/cpo-sandbox` 的登录、refresh 和权限相关测试。
-- `apps/xingxing-robot` 的登录、refresh 和权限相关测试。
 - `tests/helpers/auth-api.ts`
 - `packages/services/mekong-tests`
 
 重点验证：
 
-- 三个 MVP 应用都能使用新 Auth 完成登录、refresh 和 logout。
+- `bus-admin-web` 能使用新 Auth 完成登录、refresh 和 logout。
 - Session 无业务 claims 时 UI 权限不变。
 - Organization key 保持后业务查询结果不变。
 - 用户改组织后立即按新范围授权。
@@ -958,7 +940,7 @@ Mekong 侧：
 
 ## 13. 编码前必须确认
 
-- [ ] MVP 是否覆盖 `mekong-next/apps/bus-admin-web`、`apps/cpo-sandbox` 和 `apps/xingxing-robot`。
+- [ ] MVP 是否覆盖 `mekong-next/apps/bus-admin-web`。
 - [ ] `apps/mekong-api` 的弃用时间、剩余调用方和下线 owner。
 - [ ] Mekong Auth MongoDB 是否独享。
 - [ ] username 和 phone 的实际登录规则。

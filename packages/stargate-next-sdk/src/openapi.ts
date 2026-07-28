@@ -308,8 +308,6 @@ export interface components {
                     id: string;
                     /** Format: uri */
                     imageDataUri: string;
-                    /** @description Only returned when CAPTCHA_TEST_MODE=true. */
-                    testCode?: string;
                 };
             };
         };

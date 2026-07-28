@@ -204,7 +204,17 @@ export class StargateService implements StargateServiceContract {
     return `${this.settings.redisKeyPrefix}${prefix}${suffix}`;
   }
 
-  private createCaptchaImage(): { code: string; imageDataUri: string } {
+  private createCaptchaImage(fixedCode?: string): {
+    code: string;
+    imageDataUri: string;
+  } {
+    if (fixedCode) {
+      const fixedSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="130" height="40" viewBox="0 0 130 40"><rect width="130" height="40" fill="white"/><text x="65" y="28" text-anchor="middle" font-family="monospace" font-size="24" letter-spacing="4">${fixedCode}</text></svg>`;
+      return {
+        code: fixedCode,
+        imageDataUri: `data:image/svg+xml;base64,${Buffer.from(fixedSvg).toString("base64")}`,
+      };
+    }
     const { data, text } = svgCaptcha.create({
       charPreset: CAPTCHA_CHAR_PRESET,
       height: 40,
@@ -372,7 +382,9 @@ export class StargateService implements StargateServiceContract {
       );
     }
     const id = randomBytes(18).toString("base64url");
-    const { code, imageDataUri } = this.createCaptchaImage();
+    const { code, imageDataUri } = this.createCaptchaImage(
+      this.settings.captchaTestCode
+    );
     await withRedisTimeout(
       getRedisClient().set(
         this.redisKey(CAPTCHA_PREFIX, id),
@@ -384,9 +396,7 @@ export class StargateService implements StargateServiceContract {
         this.settings.captchaTtlSeconds
       )
     );
-    return this.settings.testCaptcha
-      ? { id, imageDataUri, testCode: code }
-      : { id, imageDataUri };
+    return { id, imageDataUri };
   }
 
   async verifyCaptcha(id: string, code: string): Promise<boolean> {

@@ -428,12 +428,7 @@
               "required": ["id", "imageDataUri"],
               "properties": {
                 "id": { "type": "string" },
-                "imageDataUri": { "type": "string", "format": "uri" },
-                "testCode": {
-                  "type": "string",
-                  "pattern": "^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$",
-                  "description": "Only returned when CAPTCHA_TEST_MODE=true."
-                }
+                "imageDataUri": { "type": "string", "format": "uri" }
               }
             }
           }

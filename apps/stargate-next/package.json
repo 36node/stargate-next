@@ -5,6 +5,7 @@
   "scripts": {
     "build": "pnpm --filter @repo/stargate-service build && nest build",
     "build:ci": "pnpm --filter @repo/stargate-service build:ci && nest build",
+    "predev": "pnpm --filter @repo/stargate-service build",
     "dev": "nest start --watch",
     "cleanup:idempotency": "pnpm --filter @repo/stargate-service cleanup:idempotency",
     "seed": "pnpm run seed:legacy-fixture",

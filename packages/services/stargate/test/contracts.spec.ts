@@ -50,4 +50,32 @@ describe("stargate service contracts", () => {
       })
     ).toThrow("must be configured together");
   });
+
+  it("requires and normalizes a fixed code in captcha test mode", () => {
+    expect(
+      loadStargateConfig({
+        ...environment,
+        CAPTCHA_TEST_CODE: "a1b2",
+        CAPTCHA_TEST_MODE: "true",
+      }).captchaTestCode
+    ).toBe("A1B2");
+    expect(() =>
+      loadStargateConfig({
+        ...environment,
+        CAPTCHA_TEST_MODE: "true",
+      })
+    ).toThrow("CAPTCHA_TEST_CODE must be configured");
+  });
+
+  it("rejects an invalid fixed captcha code", () => {
+    expect(() =>
+      loadStargateConfig({
+        ...environment,
+        CAPTCHA_TEST_CODE: "12345",
+        CAPTCHA_TEST_MODE: "true",
+      })
+    ).toThrow(
+      "CAPTCHA_TEST_CODE must contain exactly 4 ASCII letters or digits"
+    );
+  });
 });

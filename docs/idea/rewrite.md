@@ -87,7 +87,7 @@
 │   │   │   └── main.ts
 │   │   ├── migrations/
 │   │   └── test/
-│   └── playground/                 # 测试 RP、登录 UI、Token/Session 调试
+│   └── playground/                 # 测试用业务客户端、登录 UI、Token/Session 调试
 ├── packages/
 │   ├── stargate-contracts/         # 错误码、公共类型、OpenAPI 快照；不放业务实现
 │   ├── stargate-next-sdk/          # 从 stargate-next OpenAPI 自动生成
@@ -378,7 +378,7 @@ Post-MVP：
 
 ## 6. Playground 规划
 
-`apps/playground` 同时扮演测试 Relying Party 和人工调试台，至少包含：
+`apps/playground` 同时扮演测试用业务客户端和人工调试台，至少包含：
 
 1. Client/环境选择。
 2. 密码登录。
@@ -392,7 +392,7 @@ Post-MVP：
 10. Admin impersonation 与审计查看。
 11. 错误场景：错误 OTP、过期、重放、禁用账号、错误 audience、无 scope。
 
-Post-MVP 再增加 OIDC Authorization Code + PKCE、Hosted Login 和标准 RP 场景。
+Post-MVP 再增加 OIDC Authorization Code + PKCE、Hosted Login 和标准依赖认证方场景。
 
 测试约束：
 
@@ -736,7 +736,7 @@ Client、Token、claims 的变更由 Workstream C 统一审核；完整 OIDC 不
 3. Authorization Code + PKCE。
 4. 标准 Client Credentials Grant。
 5. userinfo、introspection、revocation 和标准 logout。
-6. Playground 作为标准 RP 完成端到端测试。
+6. Playground 作为标准依赖认证方完成端到端测试。
 7. 通过选定的 OIDC conformance/互操作测试。
 
 约束：

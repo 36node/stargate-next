@@ -12,6 +12,7 @@ function env(name: string): string {
 
 const baseUrl = env("STARGATE_ENDPOINT");
 const apiKey = env("STARGATE_API_KEY");
+const captchaTestCode = env("CAPTCHA_TEST_CODE").trim().toUpperCase();
 
 describe("Given the generated SDK and a running service", () => {
   it("creates, reads, logs in and refreshes through the public contract", async () => {
@@ -29,7 +30,7 @@ describe("Given the generated SDK and a running service", () => {
       account.username,
       "sdk-password",
       captcha.id,
-      captcha.testCode ?? ""
+      captchaTestCode
     );
     expect((await client.refresh(session.refreshKey)).sessionId).toBe(
       session.sessionId
