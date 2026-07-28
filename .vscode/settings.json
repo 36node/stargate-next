@@ -1,6 +1,6 @@
 {
   "tailwindCSS.experimental.configFile": {
-    "packages/ui/styles/globals.css": "packages/ui/**",
+    "apps/playground/packages/ui/styles/globals.css": "apps/playground/{app,packages/ui}/**",
     "apps/playground/app/styles.css": "apps/playground/**"
   },
   "[javascript]": {

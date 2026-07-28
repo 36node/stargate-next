@@ -11,7 +11,7 @@ function env(name: string): string {
   return value;
 }
 
-const baseUrl = env("STARGATE_BASE_URL");
+const baseUrl = env("STARGATE_ENDPOINT");
 const apiKey = env("STARGATE_API_KEY");
 
 async function request(
@@ -20,16 +20,18 @@ async function request(
   options: {
     accessToken?: string;
     body?: unknown;
+    forwardedFor?: string;
     service?: boolean;
   } = {}
 ) {
-  const { accessToken, body, service = false } = options;
+  const { accessToken, body, forwardedFor, service = false } = options;
   const response = await fetch(`${baseUrl}${path}`, {
     body: body ? JSON.stringify(body) : undefined,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
       ...(service ? { "x-api-key": apiKey } : {}),
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
     },
     method,
   });
@@ -246,7 +248,9 @@ describe("Given a running Stargate Next service", () => {
   it("rate limits repeated captcha creation", async () => {
     let response: Awaited<ReturnType<typeof request>> | undefined;
     for (let index = 0; index < 35; index += 1) {
-      response = await request("/v1/captchas", "POST");
+      response = await request("/v1/captchas", "POST", {
+        forwardedFor: "198.51.100.10",
+      });
       if (response.status === 429) {
         break;
       }

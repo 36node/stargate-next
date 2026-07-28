@@ -13,6 +13,7 @@ COPY apps/stargate-next/node_modules ./apps/stargate-next/node_modules
 COPY node_modules ./node_modules
 COPY packages/db ./packages/db
 COPY packages/redis ./packages/redis
+COPY packages/services/stargate ./packages/services/stargate
 
 RUN chown -R nestjs:nodejs /app
 

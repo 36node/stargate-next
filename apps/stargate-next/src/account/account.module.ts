@@ -1,11 +1,11 @@
 import { Module } from "@nestjs/common";
 
-import { AuthCoreService } from "../auth-core";
+import { StargateServiceModule } from "../auth/stargate-service.module";
 import { AccountController } from "./account.controller";
 
 @Module({
   controllers: [AccountController],
-  exports: [AuthCoreService],
-  providers: [AuthCoreService],
+  exports: [StargateServiceModule],
+  imports: [StargateServiceModule],
 })
 export class AccountModule {}

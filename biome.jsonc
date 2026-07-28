@@ -30,14 +30,13 @@
     "includes": [
       "**/*",
       "!apps/stargate",
-      "!packages/ui/components/shadcn",
-      "!packages/ui/lib",
-      "!packages/ui/hooks",
+      "!apps/playground/packages/ui/components/shadcn",
+      "!apps/playground/packages/ui/lib",
+      "!apps/playground/packages/ui/hooks",
       "!packages/collaboration/config.ts",
       "!packages/cms/basehub-types.d.ts",
       // 排除框架自动生成的代码检查
       "!packages/db/generated",
-      "!apps/stargate-next/src/auth-core.ts",
       "!packages/stargate-next-sdk/src/generated.ts",
       "!packages/stargate-next-sdk/src/openapi.ts"
     ]

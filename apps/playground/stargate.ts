@@ -1,14 +1,15 @@
 "use server";
 
+import { StargateNextClient } from "@repo/stargate-next-sdk";
+
 import type {
   AuthService,
   JwtVerifyConfig,
   SessionWithToken,
-} from "@repo/next-stargate";
-import { NextStargate } from "@repo/next-stargate";
-import { auth } from "@repo/services/auth/client";
-import { env } from "@repo/services/env";
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+} from "@/packages/next-stargate";
+import { NextStargate } from "@/packages/next-stargate";
+import { auth } from "@/packages/services/auth/client";
+import { env } from "@/packages/services/env";
 
 const pages = {
   login: "/sign-in",

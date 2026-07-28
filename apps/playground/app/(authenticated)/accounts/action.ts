@@ -2,10 +2,11 @@
 
 import { randomUUID } from "node:crypto";
 
-import { auth } from "@repo/services/auth/client";
-import { env } from "@repo/services/env";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
+
+import { auth } from "@/packages/services/auth/client";
+import { env } from "@/packages/services/env";
 
 export type AccountActionState = {
   error?: string;

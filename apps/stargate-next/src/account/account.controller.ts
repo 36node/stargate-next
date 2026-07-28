@@ -13,9 +13,14 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
+import type {
+  AccountInput,
+  AccountPatchInput,
+  StargateServiceContract,
+} from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
-import { AuthCoreService } from "../auth-core";
+import { STARGATE_SERVICE } from "../auth/stargate-service.module";
 
 function context(request: Request) {
   const forwardedFor = request.headers["x-forwarded-for"];
@@ -37,17 +42,17 @@ function context(request: Request) {
 
 @Controller("v1/accounts")
 export class AccountController {
-  private readonly service: AuthCoreService;
+  private readonly service: StargateServiceContract;
 
-  constructor(@Inject(AuthCoreService) service: AuthCoreService) {
+  constructor(
+    @Inject(STARGATE_SERVICE)
+    service: StargateServiceContract
+  ) {
     this.service = service;
   }
 
   @Post()
-  create(
-    @Body() body: Parameters<AuthCoreService["createAccount"]>[0],
-    @Req() request: Request
-  ) {
+  create(@Body() body: AccountInput, @Req() request: Request) {
     this.service.assertApiKey(request.header("x-api-key"));
     return this.service.createAccount(body, context(request));
   }
@@ -108,7 +113,7 @@ export class AccountController {
   @Patch(":accountId")
   patch(
     @Param("accountId") accountId: string,
-    @Body() body: Parameters<AuthCoreService["patchAccount"]>[1],
+    @Body() body: AccountPatchInput,
     @Req() request: Request
   ) {
     this.service.assertApiKey(request.header("x-api-key"));

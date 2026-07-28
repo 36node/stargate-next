@@ -1,7 +1,8 @@
-import { auth } from "@repo/services/auth/client";
-import { env } from "@repo/services/env";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
+import Link from "next/link";
 
+import { auth } from "@/packages/services/auth/client";
+import { env } from "@/packages/services/env";
 import { authBackendLabel } from "../../../auth-backend";
 import {
   AccountActions,
@@ -18,20 +19,42 @@ type Account = {
   username?: string;
 };
 
-export default async function AccountsPage() {
+const PAGE_SIZE = 10;
+
+function pageNumber(value: string | string[] | undefined): number {
+  const parsed = Number(Array.isArray(value) ? value[0] : value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+type AccountsPageProps = {
+  searchParams: Promise<{ page?: string | string[] }>;
+};
+
+export default async function AccountsPage({
+  searchParams,
+}: AccountsPageProps) {
   try {
-    const users =
-      env.STARGATE_AUTH_BACKEND === "next"
-        ? (
-            await new StargateNextClient(env.STARGATE_ENDPOINT, {
-              apiKey: env.STARGATE_API_KEY,
-            }).listAccounts()
-          ).data.map((resource) => resource.attributes)
-        : ((
-            await auth.listUsers({
-              query: { _limit: 100 },
-            })
-          ).data ?? []);
+    const requestedPage = pageNumber((await searchParams).page);
+    const offset = (requestedPage - 1) * PAGE_SIZE;
+    let total = 0;
+    let users: Account[] = [];
+
+    if (env.STARGATE_AUTH_BACKEND === "next") {
+      const accounts = await new StargateNextClient(env.STARGATE_ENDPOINT, {
+        apiKey: env.STARGATE_API_KEY,
+      }).listAccounts(offset, PAGE_SIZE);
+      total = accounts.meta.page?.total ?? accounts.data.length;
+      users = accounts.data.map((resource) => resource.attributes);
+    } else {
+      const allUsers =
+        (await auth.listUsers({ query: { _limit: 100 } })).data ?? [];
+      total = allUsers.length;
+      users = allUsers.slice(offset, offset + PAGE_SIZE);
+    }
+
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const previousPage = requestedPage - 1;
+    const nextPage = requestedPage + 1;
 
     return (
       <section className="accounts-page">
@@ -98,6 +121,25 @@ export default async function AccountsPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {totalPages > 1 && (
+          <nav aria-label="账号列表分页" className="accounts-pagination">
+            <span className="accounts-pagination-summary">
+              共 {total} 个账号，第 {requestedPage} / {totalPages} 页
+            </span>
+            <div className="accounts-pagination-actions">
+              {previousPage > 0 ? (
+                <Link href={`/accounts?page=${previousPage}`}>上一页</Link>
+              ) : (
+                <span aria-disabled="true">上一页</span>
+              )}
+              {requestedPage < totalPages ? (
+                <Link href={`/accounts?page=${nextPage}`}>下一页</Link>
+              ) : (
+                <span aria-disabled="true">下一页</span>
+              )}
+            </div>
+          </nav>
         )}
       </section>
     );

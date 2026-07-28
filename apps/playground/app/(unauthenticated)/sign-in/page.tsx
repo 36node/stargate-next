@@ -1,6 +1,6 @@
-import { env } from "@repo/services/env";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 
+import { env } from "@/packages/services/env";
 import { authBackendLabel } from "../../../auth-backend";
 import { LoginForm } from "./login-form";
 

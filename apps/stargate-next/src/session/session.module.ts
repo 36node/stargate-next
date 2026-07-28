@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
 
-import { AccountModule } from "../account/account.module";
+import { StargateServiceModule } from "../auth/stargate-service.module";
 import { SessionController } from "./session.controller";
 
 @Module({
   controllers: [SessionController],
-  imports: [AccountModule],
+  imports: [StargateServiceModule],
 })
 export class SessionModule {}

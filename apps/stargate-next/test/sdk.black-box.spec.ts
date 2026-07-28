@@ -10,7 +10,7 @@ function env(name: string): string {
   return value;
 }
 
-const baseUrl = env("STARGATE_BASE_URL");
+const baseUrl = env("STARGATE_ENDPOINT");
 const apiKey = env("STARGATE_API_KEY");
 
 describe("Given the generated SDK and a running service", () => {

@@ -12,9 +12,10 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
+import type { StargateServiceContract } from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
-import { AuthCoreService } from "../auth-core";
+import { STARGATE_SERVICE } from "../auth/stargate-service.module";
 
 function context(request: Request) {
   const forwardedFor = request.headers["x-forwarded-for"];
@@ -46,9 +47,12 @@ function requiredString(value: unknown, field: string): string {
 
 @Controller("v1")
 export class SessionController {
-  private readonly service: AuthCoreService;
+  private readonly service: StargateServiceContract;
 
-  constructor(@Inject(AuthCoreService) service: AuthCoreService) {
+  constructor(
+    @Inject(STARGATE_SERVICE)
+    service: StargateServiceContract
+  ) {
     this.service = service;
   }
 

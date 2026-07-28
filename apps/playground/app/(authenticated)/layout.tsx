@@ -1,7 +1,7 @@
-import { env } from "@repo/services/env";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 import type { ReactNode } from "react";
 
+import { env } from "@/packages/services/env";
 import { authBackendLabel } from "../../auth-backend";
 import { ensureSession } from "../../stargate";
 import { logoutAction } from "../action";

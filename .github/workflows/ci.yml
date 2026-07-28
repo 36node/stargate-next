@@ -59,6 +59,10 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
       - name: Code check
         run: pnpm check
+      - name: Verify Stargate service boundaries
+        run: |
+          ! rg -n '@repo/(db|redis)' apps/stargate-next --glob '*.ts'
+          ! rg -n '@(repo/db|repo/redis|prisma|nestjs)/' packages/services/stargate/src/contracts.ts
       - name: Verify OpenAPI SDK snapshot
         run: |
           pnpm sdk:generate
@@ -91,7 +95,7 @@ jobs:
           REFRESH_KEY_HMAC_PRIMARY_KEY_ID: ci-primary
           REFRESH_KEY_HMAC_PRIMARY_SECRET: ci-primary-secret
           STARGATE_API_KEY: ci-service-api-key
-          STARGATE_BASE_URL: http://127.0.0.1:9527
+          STARGATE_ENDPOINT: http://127.0.0.1:9527
 
   docker:
     if: github.actor != 'dependabot[bot]'

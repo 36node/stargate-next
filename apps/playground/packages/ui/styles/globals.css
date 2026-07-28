@@ -1,0 +1,268 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "../**/*.{ts,tsx}";
+@source "../../../app/**/*.{ts,tsx}";
+
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+  --background: rgb(255, 255, 255);
+  --foreground: rgb(10, 10, 10);
+  --card: rgb(255, 255, 255);
+  --card-foreground: rgb(9, 9, 11);
+  --popover: rgb(255, 255, 255);
+  --popover-foreground: rgb(9, 9, 11);
+  --primary: rgb(23, 23, 23);
+  --primary-foreground: rgb(250, 250, 250);
+  --secondary: rgb(244, 244, 245);
+  --secondary-foreground: rgb(24, 24, 27);
+  --muted: rgb(244, 244, 245);
+  --muted-foreground: rgb(115, 115, 115);
+  --accent: rgb(244, 244, 245);
+  --accent-foreground: rgb(24, 24, 27);
+  --destructive: rgb(231, 0, 11);
+  --destructive-foreground: rgb(255, 255, 255);
+  --border: rgb(228, 228, 231);
+  --input: rgb(228, 228, 231);
+  --ring: rgb(43, 127, 255);
+  --chart-1: rgb(231, 110, 80);
+  --chart-2: rgb(42, 157, 144);
+  --chart-3: rgb(39, 71, 84);
+  --chart-4: rgb(234, 196, 104);
+  --chart-5: rgb(244, 164, 98);
+  --sidebar: rgb(250, 250, 250);
+  --sidebar-foreground: rgb(9, 9, 11);
+  --sidebar-primary: rgb(23, 23, 23);
+  --sidebar-primary-foreground: rgb(250, 250, 250);
+  --sidebar-accent: rgb(244, 244, 245);
+  --sidebar-accent-foreground: rgb(24, 24, 27);
+  --sidebar-border: rgb(228, 228, 231);
+  --sidebar-ring: rgb(43, 127, 255);
+
+  /* 以下是自定义 token */
+  --bgInCard: rgb(255, 255, 255);
+  --tab-selected: rgb(255, 255, 255);
+  --success: rgb(22, 163, 74);
+  --warning: rgb(234, 179, 8);
+  --level3: rgb(231, 0, 11);
+  --level2: rgb(249, 115, 22);
+  --level1: rgb(250, 204, 21);
+  --chart-primary: rgb(96, 165, 250);
+
+  --font-weight-bold: 700;
+}
+
+.dark {
+  --background: rgb(9, 9, 11);
+  --foreground: rgb(250, 250, 250);
+  --card: rgb(24, 24, 27);
+  --card-foreground: rgb(250, 250, 250);
+  --popover: rgb(24, 24, 27);
+  --popover-foreground: rgb(250, 250, 250);
+  --primary: rgb(229, 229, 229);
+  --primary-foreground: rgb(23, 23, 23);
+  --secondary: rgb(39, 39, 42);
+  --secondary-foreground: rgb(250, 250, 250);
+  --muted: rgb(39, 39, 42);
+  --muted-foreground: rgb(159, 159, 169);
+  --accent: rgb(39, 39, 42);
+  --accent-foreground: rgb(250, 250, 250);
+  --destructive: rgb(255, 100, 103);
+  --destructive-foreground: rgb(250, 250, 250);
+  --border: rgb(255 255 255 / 10.2%);
+  --input: rgb(255 255 255 / 14.9%);
+  --ring: rgb(20, 71, 230);
+  --chart-1: rgb(226, 54, 112);
+  --chart-2: rgb(38, 98, 217);
+  --chart-3: rgb(232, 140, 48);
+  --chart-4: rgb(175, 87, 219);
+  --chart-5: rgb(46, 184, 138);
+  --sidebar: rgb(24, 24, 27);
+  --sidebar-foreground: rgb(250, 250, 250);
+  --sidebar-primary: rgb(229, 229, 229);
+  --sidebar-primary-foreground: rgb(23, 23, 23);
+  --sidebar-accent: rgb(39, 39, 42);
+  --sidebar-accent-foreground: rgb(250, 250, 250);
+  --sidebar-border: rgb(255 255 255 / 10.2%);
+  --sidebar-ring: rgb(20, 71, 230);
+
+  /* 以下是自定义 token */
+  --bgInCard: rgb(33, 33, 33);
+  --tab-selected: rgb(47, 47, 47);
+  --success: rgb(22, 163, 74);
+  --warning: rgb(234, 179, 8);
+  --level3: rgb(255, 100, 103);
+  --level2: rgb(255, 143, 66);
+  --level1: rgb(250, 204, 21);
+  --chart-primary: rgb(96, 165, 250);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans:
+    "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+/* This layer is added by shadcn/ui */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+  }
+}
+
+/* This layer is by next-forge */
+@layer base {
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    @apply border-border;
+  }
+  /* * {
+    @apply min-w-0;
+  } */
+  html {
+    text-rendering: optimizelegibility;
+  }
+  body {
+    @apply min-h-[100dvh];
+  }
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-muted-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+/* Typography plugin */
+@utility prose {
+  --tw-prose-body: var(--color-foreground);
+  --tw-prose-headings: var(--color-foreground);
+  --tw-prose-lead: var(--color-muted-foreground);
+  --tw-prose-links: var(--color-primary);
+  --tw-prose-bold: var(--color-foreground);
+  --tw-prose-counters: var(--color-foreground);
+  --tw-prose-bullets: var(--color-muted-foreground);
+  --tw-prose-hr: var(--color-muted-foreground);
+  --tw-prose-quotes: var(--color-muted-foreground);
+  --tw-prose-quote-borders: var(--color-border);
+  --tw-prose-captions: var(--color-muted-foreground);
+  --tw-prose-code: var(--color-foreground);
+  --tw-prose-pre-code: var(--color-foreground);
+  --tw-prose-pre-bg: var(--color-background);
+  --tw-prose-th-borders: var(--color-border);
+  --tw-prose-td-borders: var(--color-border);
+  --tw-prose-invert-body: var(--color-foreground);
+  --tw-prose-invert-headings: var(--color-foreground);
+  --tw-prose-invert-lead: var(--color-muted-foreground);
+  --tw-prose-invert-links: var(--color-primary);
+  --tw-prose-invert-bold: var(--color-foreground);
+  --tw-prose-invert-counters: var(--color-foreground);
+  --tw-prose-invert-bullets: var(--color-foreground);
+  --tw-prose-invert-hr: var(--color-muted-foreground);
+  --tw-prose-invert-quotes: var(--color-muted-foreground);
+  --tw-prose-invert-quote-borders: var(--color-border);
+  --tw-prose-invert-captions: var(--color-muted-foreground);
+  --tw-prose-invert-code: var(--color-foreground);
+  --tw-prose-invert-pre-code: var(--color-foreground);
+  --tw-prose-invert-pre-bg: var(--color-background);
+  --tw-prose-invert-th-borders: var(--color-border);
+  --tw-prose-invert-td-borders: var(--color-border);
+}
+
+/* 自定义滚动条样式 */
+.scrollbar-custom {
+  /* 滚动条整体宽度/高度 */
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #aaaaaa transparent; /* Firefox: 滚动条颜色 + 背景透明 */
+}
+
+/* Webkit 浏览器 */
+.scrollbar-custom::-webkit-scrollbar {
+  width: 8px; /* 垂直滚动条宽度 */
+  height: 8px; /* 水平滚动条高度 */
+  background: transparent; /* 背景透明 */
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb {
+  background-color: #aaaaaa; /* 滚动条颜色 */
+  border-radius: 9999px; /* 圆角 */
+  border: 2px solid transparent; /* 留出一点内边距，让滚动条更"漂浮" */
+  background-clip: content-box;
+}
+
+.scrollbar-custom::-webkit-scrollbar-track {
+  background: transparent; /* 滚动条轨道透明 */
+}

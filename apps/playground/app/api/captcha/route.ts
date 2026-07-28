@@ -1,6 +1,7 @@
-import { env } from "@repo/services/env";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { NextResponse } from "next/server";
+
+import { env } from "@/packages/services/env";
 
 export const dynamic = "force-dynamic";
 

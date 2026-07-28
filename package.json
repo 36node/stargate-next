@@ -14,7 +14,7 @@
     "translate": "turbo translate",
     "boundaries": "turbo boundaries",
     "bump-deps": "npx npm-check-updates --deep -u -x recharts && pnpm install",
-    "bump-ui": "npx shadcn@latest add --all --overwrite -c packages/ui",
+    "bump-ui": "pnpm -C apps/playground dlx shadcn@latest add --all --overwrite -c packages/ui",
     "clean": "git clean -xdf node_modules",
     "db:push": "pnpm --filter @repo/db push",
     "db:push:force": "pnpm --filter @repo/db push:force",
@@ -22,7 +22,7 @@
     "db:studio": "pnpm --filter @repo/db studio",
     "seed": "pnpm --filter stargate-next seed",
     "sdk:generate": "pnpm --filter @repo/stargate-next-sdk generate",
-    "storybook": "pnpm -C packages/ui storybook",
+    "storybook": "pnpm -C apps/playground storybook",
     "postinstall": "scripts/setup-env.sh",
     "prepare": "husky"
   },

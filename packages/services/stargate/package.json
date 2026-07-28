@@ -1,0 +1,48 @@
+{
+  "name": "@repo/stargate-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "typesVersions": {
+    "*": {
+      "contracts": [
+        "src/contracts.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./src/contracts.ts",
+      "default": "./src/contracts.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --dts --clean",
+    "build:ci": "tsup src/index.ts --format cjs --dts --clean",
+    "cleanup:idempotency": "DOTENV_CONFIG_PATH=../../../.env node -r dotenv/config -r ts-node/register scripts/cleanup-idempotency.ts",
+    "seed:legacy-fixture": "DOTENV_CONFIG_PATH=../../../.env node -r dotenv/config -r ts-node/register scripts/seed-legacy-fixture.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/db": "workspace:*",
+    "@repo/redis": "workspace:*",
+    "dotenv": "^17.4.2",
+    "svg-captcha": "^1.4.0"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "^24.10.1",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

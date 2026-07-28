@@ -33,7 +33,8 @@ stargate_next_sha="$(
   fingerprint \
     apps/stargate-next/Dockerfile \
     apps/stargate-next/package.json \
-    apps/stargate-next/dist
+    apps/stargate-next/dist \
+    packages/services/stargate
 )"
 
 playground_sha="$(
