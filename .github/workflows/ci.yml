@@ -118,7 +118,7 @@ jobs:
       - name: Docker metadata for Stargate Next
         if: github.actor != 'dependabot[bot]'
         id: meta-stargate-next
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next
           tags: |
@@ -128,7 +128,7 @@ jobs:
       - name: Docker metadata for Playground
         if: github.actor != 'dependabot[bot]'
         id: meta-playground
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground
           tags: |
