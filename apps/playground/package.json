@@ -78,7 +78,7 @@
     "@storybook/nextjs": "^10.3.5",
     "@storybook/react": "^10.3.5",
     "@tailwindcss/postcss": "^4.1.17",
-    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/typography": "^0.5.20",
     "@types/node": "24.10.1",
     "@types/react": "19.2.9",
     "@types/react-dom": "19.2.3",
