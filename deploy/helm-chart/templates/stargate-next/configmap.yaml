@@ -1,0 +1,26 @@
+{{- if .Values.stargateNext.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stargate-next.serviceName" . }}-config
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stargate-next
+data:
+  NODE_ENV: {{ .Values.stargateNext.config.nodeEnv | quote }}
+  PORT: "9527"
+  LOG_LEVEL: {{ .Values.stargateNext.config.logLevel | quote }}
+  REDIS_KEY_PREFIX: {{ .Values.stargateNext.config.redisKeyPrefix | quote }}
+  ACCESS_TOKEN_TTL_SECONDS: {{ .Values.stargateNext.config.accessTokenTtlSeconds | quote }}
+  REFRESH_TTL_SECONDS: {{ .Values.stargateNext.config.refreshTokenTtlSeconds | quote }}
+  CAPTCHA_TTL_SECONDS: {{ .Values.stargateNext.config.captchaTtlSeconds | quote }}
+  CAPTCHA_MAX_ATTEMPTS: {{ .Values.stargateNext.config.captchaMaxAttempts | quote }}
+  CAPTCHA_CREATE_LIMIT: {{ .Values.stargateNext.config.captchaCreateLimit | quote }}
+  CAPTCHA_CREATE_WINDOW_SECONDS: {{ .Values.stargateNext.config.captchaCreateWindowSeconds | quote }}
+  LOGIN_MAX_ATTEMPTS: {{ .Values.stargateNext.config.loginMaxAttempts | quote }}
+  LOGIN_LOCK_SECONDS: {{ .Values.stargateNext.config.loginLockSeconds | quote }}
+  {{- if .Values.stargateNext.config.captchaTestMode }}
+  CAPTCHA_TEST_MODE: "true"
+  CAPTCHA_TEST_CODE: {{ .Values.stargateNext.config.captchaTestCode | quote }}
+  {{- end }}
+{{- end }}

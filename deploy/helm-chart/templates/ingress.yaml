@@ -1,0 +1,56 @@
+{{- if and .Values.ingress.enabled (or (and .Values.stargateNext.enabled .Values.ingress.stargateNext.enabled) (and .Values.playground.enabled .Values.ingress.playground.enabled)) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "stargate-next.fullname" . }}
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    {{- if and .Values.stargateNext.enabled .Values.ingress.stargateNext.enabled }}
+    - {{- with .Values.ingress.stargateNext.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.stargateNext.path }}
+            pathType: {{ .Values.ingress.stargateNext.pathType }}
+            backend:
+              service:
+                name: {{ include "stargate-next.serviceName" . }}
+                port:
+                  name: http
+    {{- end }}
+    {{- if and .Values.playground.enabled .Values.ingress.playground.enabled }}
+    - {{- with .Values.ingress.playground.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.playground.path }}
+            pathType: {{ .Values.ingress.playground.pathType }}
+            backend:
+              service:
+                name: {{ include "stargate-next.playgroundServiceName" . }}
+                port:
+                  name: http
+    {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - secretName: {{ required "ingress.tls.secretName is required when TLS is enabled" .Values.ingress.tls.secretName | quote }}
+      hosts:
+        {{- if and .Values.stargateNext.enabled .Values.ingress.stargateNext.enabled .Values.ingress.stargateNext.host }}
+        - {{ .Values.ingress.stargateNext.host | quote }}
+        {{- end }}
+        {{- if and .Values.playground.enabled .Values.ingress.playground.enabled .Values.ingress.playground.host }}
+        - {{ .Values.ingress.playground.host | quote }}
+        {{- end }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,89 @@
+global:
+  imageRegistry: harbor.36node.com
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+stargateNext:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: stargate/stargate-next
+    tag: main
+    digest: ""
+    pullPolicy: ""
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 9527
+  config:
+    nodeEnv: production
+    logLevel: info
+    redisKeyPrefix: "stargate-next:"
+    accessTokenTtlSeconds: "3600"
+    refreshTokenTtlSeconds: "604800"
+    captchaTtlSeconds: "300"
+    captchaMaxAttempts: "5"
+    captchaCreateLimit: "30"
+    captchaCreateWindowSeconds: "60"
+    loginMaxAttempts: "5"
+    loginLockSeconds: "60"
+    captchaTestMode: false
+    captchaTestCode: ""
+  secrets:
+    databaseUrl: ""
+    redisUrl: ""
+    stargateApiKey: ""
+    stargateJwtSecret: ""
+    captchaHmacSecret: ""
+    refreshKeyHmacPrimaryKeyId: ""
+    refreshKeyHmacPrimarySecret: ""
+    refreshKeyHmacSecondaryKeyId: ""
+    refreshKeyHmacSecondarySecret: ""
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+playground:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: stargate/playground
+    tag: main
+    digest: ""
+    pullPolicy: ""
+    pullSecrets: []
+  service:
+    type: ClusterIP
+    port: 3000
+  config:
+    stargateAuthBackend: next
+    stargateEndpoint: ""
+    stargateJwtPublicKey: ""
+  resources: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls:
+    enabled: false
+    secretName: ""
+  stargateNext:
+    enabled: false
+    host: ""
+    path: /
+    pathType: Prefix
+  playground:
+    enabled: true
+    host: ""
+    path: /
+    pathType: Prefix

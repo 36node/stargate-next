@@ -1,0 +1,19 @@
+{{- if .Values.playground.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stargate-next.playgroundServiceName" . }}
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+    app.kubernetes.io/component: playground
+spec:
+  type: {{ .Values.playground.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.playground.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "stargate-next.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: playground
+{{- end }}

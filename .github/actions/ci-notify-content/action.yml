@@ -2,8 +2,11 @@ name: 'CI Notify Content'
 description: '根据 CI 结果生成统一的通知内容'
 
 inputs:
-  build_result:
-    description: 'test-and-docker job 的结果 (success/failure/skipped)'
+  test_and_build_result:
+    description: 'test-and-build job 的结果 (success/failure/cancelled/skipped)'
+    required: true
+  build_helm_chart_result:
+    description: 'build-helm-chart job 的结果 (success/failure/cancelled/skipped)'
     required: true
   run_url:
     description: 'GitHub Actions run URL'
@@ -24,32 +27,35 @@ runs:
       id: build
       shell: bash
       env:
-        BUILD_RESULT: ${{ inputs.build_result }}
+        TEST_AND_BUILD_RESULT: ${{ inputs.test_and_build_result }}
+        BUILD_HELM_CHART_RESULT: ${{ inputs.build_helm_chart_result }}
         RUN_URL: ${{ inputs.run_url }}
       run: |
         icon_for() {
           case "$1" in
             success) printf "✅" ;;
             failure) printf "❌" ;;
-            *) printf "⏭️" ;;
+            cancelled) printf "⏹️" ;;
+            skipped) printf "⏭️" ;;
+            *) printf "❓" ;;
           esac
         }
 
-        if [ "$BUILD_RESULT" = "success" ]; then
+        if [ "$TEST_AND_BUILD_RESULT" = "success" ] &&
+          { [ "$BUILD_HELM_CHART_RESULT" = "success" ] || [ "$BUILD_HELM_CHART_RESULT" = "skipped" ]; }; then
           OVERALL="success"
         else
           OVERALL="failure"
         fi
         echo "overall=$OVERALL" >> $GITHUB_OUTPUT
 
-        STATUS_LINE="构建与测试 $(icon_for "$BUILD_RESULT")"
-
         {
           echo "content<<EOF"
-          echo "$STATUS_LINE"
-          if [ "$OVERALL" != "success" ]; then
-            echo ""
-            echo "🔗 详情: $RUN_URL"
-          fi
+          echo "CI 结果：$(icon_for "$OVERALL")"
+          echo ""
+          echo "测试与镜像构建：$(icon_for "$TEST_AND_BUILD_RESULT") $TEST_AND_BUILD_RESULT"
+          echo "Helm Chart 构建与发布：$(icon_for "$BUILD_HELM_CHART_RESULT") $BUILD_HELM_CHART_RESULT"
+          echo ""
+          echo "🔗 详情: $RUN_URL"
           echo "EOF"
         } >> $GITHUB_OUTPUT

@@ -1,0 +1,15 @@
+{{- if .Values.playground.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stargate-next.playgroundServiceName" . }}-config
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+    app.kubernetes.io/component: playground
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+  STARGATE_AUTH_BACKEND: {{ .Values.playground.config.stargateAuthBackend | quote }}
+  STARGATE_ENDPOINT: {{ .Values.playground.config.stargateEndpoint | default (printf "http://%s:%v" (include "stargate-next.serviceName" .) .Values.stargateNext.service.port) | quote }}
+{{- end }}

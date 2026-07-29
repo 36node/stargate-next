@@ -1,0 +1,6 @@
+apiVersion: v2
+name: stargate-next
+description: Deploys Stargate Next and its Playground
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

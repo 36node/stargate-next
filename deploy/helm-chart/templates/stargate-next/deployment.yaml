@@ -1,0 +1,63 @@
+{{- if .Values.stargateNext.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stargate-next.serviceName" . }}
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stargate-next
+spec:
+  replicas: {{ .Values.stargateNext.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stargate-next.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: stargate-next
+  template:
+    metadata:
+      annotations:
+        checksum/stargate-next-config: {{ include (print $.Template.BasePath "/stargate-next/configmap.yaml") . | sha256sum }}
+        checksum/stargate-next-secret: {{ include (print $.Template.BasePath "/stargate-next/secret.yaml") . | sha256sum }}
+        {{- with .Values.stargateNext.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "stargate-next.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: stargate-next
+    spec:
+      {{- include "stargate-next.imagePullSecrets" (dict "image" .Values.stargateNext.image "global" .Values.global) | nindent 6 }}
+      containers:
+        - name: stargate-next
+          image: {{ include "stargate-next.image" (dict "image" .Values.stargateNext.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.stargateNext.image.pullPolicy | default .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9527
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "stargate-next.serviceName" . }}-config
+            - secretRef:
+                name: {{ include "stargate-next.serviceName" . }}-secret
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          resources:
+            {{- toYaml .Values.stargateNext.resources | nindent 12 }}
+      {{- with .Values.stargateNext.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.stargateNext.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.stargateNext.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

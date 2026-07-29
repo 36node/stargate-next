@@ -1,0 +1,63 @@
+{{- if .Values.playground.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stargate-next.playgroundServiceName" . }}
+  labels:
+    {{- include "stargate-next.labels" . | nindent 4 }}
+    app.kubernetes.io/component: playground
+spec:
+  replicas: {{ .Values.playground.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stargate-next.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: playground
+  template:
+    metadata:
+      annotations:
+        checksum/playground-config: {{ include (print $.Template.BasePath "/playground/configmap.yaml") . | sha256sum }}
+        checksum/playground-secret: {{ include (print $.Template.BasePath "/playground/secret.yaml") . | sha256sum }}
+        {{- with .Values.playground.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "stargate-next.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: playground
+    spec:
+      {{- include "stargate-next.imagePullSecrets" (dict "image" .Values.playground.image "global" .Values.global) | nindent 6 }}
+      containers:
+        - name: playground
+          image: {{ include "stargate-next.image" (dict "image" .Values.playground.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.playground.image.pullPolicy | default .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "stargate-next.playgroundServiceName" . }}-config
+            - secretRef:
+                name: {{ include "stargate-next.playgroundServiceName" . }}-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            {{- toYaml .Values.playground.resources | nindent 12 }}
+      {{- with .Values.playground.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.playground.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.playground.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

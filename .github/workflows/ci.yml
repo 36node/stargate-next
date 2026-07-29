@@ -6,6 +6,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches: [main, "milestone/*", "release/*"]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,7 +17,8 @@ env:
   HARBOR_PROJECT: stargate
 
 jobs:
-  test:
+  test-and-build:
+    name: Test and build
     runs-on: arc-runners-mekong
     timeout-minutes: 30
     services:
@@ -95,34 +97,26 @@ jobs:
           STARGATE_API_KEY: ci-service-api-key
           STARGATE_ENDPOINT: http://127.0.0.1:9527
 
-  docker:
-    if: github.actor != 'dependabot[bot]'
-    runs-on: arc-runners-mekong
-    timeout-minutes: 30
-    outputs:
-      stargate_next_image_tag: input-${{ steps.image-fingerprints.outputs.stargate_next_sha }}
-      playground_image_tag: input-${{ steps.image-fingerprints.outputs.playground_sha }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build
+      - name: Build application artifacts
+        if: github.actor != 'dependabot[bot]'
         run: pnpm build:ci --summarize
         env:
           NODE_ENV: production
           BUILD_STANDALONE: "true"
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        if: github.actor != 'dependabot[bot]'
+        uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
-      - uses: docker/login-action@v3
+      - name: Login to Harbor
+        if: github.actor != 'dependabot[bot]'
+        uses: docker/login-action@v3
         with:
           registry: ${{ env.HARBOR_DOMAIN }}
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWORD }}
       - name: Docker metadata for Stargate Next
+        if: github.actor != 'dependabot[bot]'
         id: meta-stargate-next
         uses: docker/metadata-action@v5
         with:
@@ -132,6 +126,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
       - name: Docker metadata for Playground
+        if: github.actor != 'dependabot[bot]'
         id: meta-playground
         uses: docker/metadata-action@v5
         with:
@@ -141,9 +136,11 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
       - name: Compute image fingerprints
+        if: github.actor != 'dependabot[bot]'
         id: image-fingerprints
         run: bash scripts/docker-image-fingerprint.sh >> "$GITHUB_OUTPUT"
       - name: Plan image builds
+        if: github.actor != 'dependabot[bot]'
         id: image-plan
         env:
           STARGATE_NEXT_SHA: ${{ steps.image-fingerprints.outputs.stargate_next_sha }}
@@ -180,8 +177,8 @@ jobs:
           plan_image "stargate-next" "stargate-next" "$STARGATE_NEXT_SHA" "$STARGATE_NEXT_META_TAGS" "stargate_next"
           plan_image "playground" "playground" "$PLAYGROUND_SHA" "$PLAYGROUND_META_TAGS" "playground"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
-      - name: Build and push cache misses
-        if: steps.image-plan.outputs.bake_targets != ''
+      - name: Build and push image cache misses
+        if: github.actor != 'dependabot[bot]' && steps.image-plan.outputs.bake_targets != ''
         uses: docker/bake-action@v6
         with:
           source: .
@@ -192,7 +189,7 @@ jobs:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
       - name: Build summary
-        if: always()
+        if: always() && github.actor != 'dependabot[bot]'
         run: |
           {
             echo "## Image build results"
@@ -203,9 +200,85 @@ jobs:
             echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground:${{ steps.meta-playground.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  build-helm-chart:
+    name: Build Helm chart
+    runs-on: arc-runners-mekong
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Login to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.HARBOR_DOMAIN }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Compute chart fingerprint
+        id: chart-fingerprint
+        run: |
+          set -euo pipefail
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256_cmd() {
+              sha256sum "$@" | awk '{print $1}'
+            }
+          else
+            sha256_cmd() {
+              shasum -a 256 "$@" | awk '{print $1}'
+            }
+          fi
+
+          manifest_file="$(mktemp)"
+
+          {
+            printf 'helm-chart-fingerprint-v1\n'
+            git ls-files -z -- deploy/helm-chart \
+              | LC_ALL=C sort -z \
+              | while IFS= read -r -d '' file; do
+                  printf 'file %s\n' "$file"
+                  sha256_cmd "$file"
+                  printf '\n'
+                done
+          } > "$manifest_file"
+
+          chart_sha="$(sha256_cmd "$manifest_file")"
+          rm -f "$manifest_file"
+
+          echo "chart_sha=${chart_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Lint Helm chart
+        run: helm lint deploy/helm-chart
+
+      - name: Package and push Helm chart
+        run: |
+          set -euo pipefail
+
+          chart_dir="deploy/helm-chart"
+          destination="${RUNNER_TEMP}/helm-chart"
+          branch_version="0.0.0-main"
+          fingerprint_version="0.0.0-input-${CHART_SHA}"
+          repository="oci://${HARBOR_DOMAIN}/${HARBOR_PROJECT}"
+
+          mkdir -p "$destination"
+
+          helm package "$chart_dir" --version "$branch_version" --destination "$destination"
+          helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
+
+          helm push "${destination}/stargate-next-${branch_version}.tgz" "$repository"
+          helm push "${destination}/stargate-next-${fingerprint_version}.tgz" "$repository"
+        env:
+          CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
+
+
   notify:
-    needs: [test, docker]
-    if: ${{ always() && github.actor != 'dependabot[bot]' && needs.test.result != 'cancelled' && needs.docker.result != 'cancelled' }}
+    needs: [test-and-build, build-helm-chart]
+    if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: arc-runners-mekong
     steps:
       - uses: actions/checkout@v6
@@ -213,7 +286,8 @@ jobs:
         id: notify
         uses: ./.github/actions/ci-notify-content
         with:
-          build_result: ${{ (needs.test.result == 'success' && needs.docker.result == 'success') && 'success' || 'failure' }}
+          test_and_build_result: ${{ needs['test-and-build'].result }}
+          build_helm_chart_result: ${{ needs['build-helm-chart'].result }}
           run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       - name: Send UAT notification
         if: ${{ github.event_name == 'push' }}
