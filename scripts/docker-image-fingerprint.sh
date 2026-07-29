@@ -18,7 +18,7 @@ fingerprint() {
       test -e "$path"
       printf '%s\n' "$path"
       if test -d "$path"; then
-        rg --files -uu "$path" | LC_ALL=C sort | while IFS= read -r file; do
+        find "$path" -type f -print | LC_ALL=C sort | while IFS= read -r file; do
           printf '%s\n' "$file"
           shasum -a 256 "$file"
         done
@@ -41,8 +41,7 @@ playground_sha="$(
   fingerprint \
     apps/playground/Dockerfile \
     apps/playground/.next/standalone \
-    apps/playground/.next/static \
-    apps/playground/data
+    apps/playground/.next/static
 )"
 
 cat <<EOF

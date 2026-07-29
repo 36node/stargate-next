@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "pnpm --filter @repo/stargate-service build && nest build",
-    "build:ci": "pnpm --filter @repo/stargate-service build:ci && nest build",
+    "build": "pnpm --filter @repo/stargate-service... --if-present build && nest build",
+    "build:ci": "pnpm --filter @repo/stargate-service... --if-present build:ci && nest build",
     "predev": "pnpm --filter @repo/stargate-service build",
     "dev": "nest start --watch",
     "cleanup:idempotency": "pnpm --filter @repo/stargate-service cleanup:idempotency",

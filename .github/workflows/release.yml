@@ -15,7 +15,7 @@ env:
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: arc-runners-mekong
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       stargate_next_released: ${{ steps.release.outputs['apps/stargate-next--release_created'] }}

@@ -17,7 +17,7 @@ env:
 
 jobs:
   test:
-    runs-on: arc-runners-haivivi
+    runs-on: arc-runners-mekong
     timeout-minutes: 30
     services:
       postgres:
@@ -89,7 +89,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379
-          REDIS_KEY_PREFIX: stargate-next:ci-${{ github.run_id }}:
+          REDIS_KEY_PREFIX: "stargate-next:ci-${{ github.run_id }}:"
           REFRESH_KEY_HMAC_PRIMARY_KEY_ID: ci-primary
           REFRESH_KEY_HMAC_PRIMARY_SECRET: ci-primary-secret
           STARGATE_API_KEY: ci-service-api-key
@@ -97,7 +97,7 @@ jobs:
 
   docker:
     if: github.actor != 'dependabot[bot]'
-    runs-on: arc-runners-haivivi
+    runs-on: arc-runners-mekong
     timeout-minutes: 30
     outputs:
       stargate_next_image_tag: input-${{ steps.image-fingerprints.outputs.stargate_next_sha }}
@@ -206,7 +206,7 @@ jobs:
   notify:
     needs: [test, docker]
     if: ${{ always() && github.actor != 'dependabot[bot]' && needs.test.result != 'cancelled' && needs.docker.result != 'cancelled' }}
-    runs-on: arc-runners-haivivi
+    runs-on: arc-runners-mekong
     steps:
       - uses: actions/checkout@v6
       - name: Build notification content

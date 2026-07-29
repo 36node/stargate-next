@@ -27,7 +27,7 @@
     "build": "tsup src/index.ts --format cjs --dts --clean",
     "build:ci": "tsup src/index.ts --format cjs --dts --clean",
     "cleanup:idempotency": "DOTENV_CONFIG_PATH=../../../.env node -r dotenv/config -r ts-node/register scripts/cleanup-idempotency.ts",
-    "seed:legacy-fixture": "DOTENV_CONFIG_PATH=../../../.env node -r dotenv/config -r ts-node/register scripts/seed-legacy-fixture.ts",
+    "seed:legacy-fixture": "pnpm --filter @repo/db build && DOTENV_CONFIG_PATH=../../../.env TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' node -r dotenv/config -r ts-node/register scripts/seed-legacy-fixture.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
