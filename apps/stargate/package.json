@@ -56,7 +56,7 @@
     "nanoid": "^3.3.7",
     "nodemailer": "^6.9.13",
     "path-to-regexp": "0.1.7",
-    "postmark": "^4.0.2",
+    "postmark": "^5.1.0",
     "redis": "^4.6.14",
     "reflect-metadata": "0.2.2",
     "rxjs": "^7.2.0",
