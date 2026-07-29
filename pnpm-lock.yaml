@@ -11868,7 +11868,7 @@ snapshots:
 
   '@types/webpack@5.28.5(lightningcss@1.30.2)(postcss@8.5.16)':
     dependencies:
-      '@types/node': 24.13.2
+      '@types/node': 24.10.1
       tapable: 2.3.3
       webpack: 5.109.2(lightningcss@1.30.2)(postcss@8.5.16)
     transitivePeerDependencies:
