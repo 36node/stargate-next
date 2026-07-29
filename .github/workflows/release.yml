@@ -87,7 +87,7 @@ jobs:
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push release images
         if: steps.image-plan.outputs.bake_targets != ''
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@v7
         with:
           source: .
           files: docker-bake.hcl
