@@ -23,7 +23,7 @@ jobs:
       playground_released: ${{ steps.release.outputs['apps/playground--release_created'] }}
       playground_tag: ${{ steps.release.outputs['apps/playground--tag_name'] }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
