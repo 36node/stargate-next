@@ -14,14 +14,16 @@ sha256() {
 fingerprint() {
   (
     cd "$ROOT_DIR"
+    printf 'node=%s\n' "$(node --version)"
+    printf 'pnpm=%s\n' "$(pnpm --version)"
+    printf 'arch=%s\n' "$(uname -m)"
     for path in "$@"; do
       test -e "$path"
       printf '%s\n' "$path"
       if test -d "$path"; then
-        find "$path" -type f -print | LC_ALL=C sort | while IFS= read -r file; do
-          printf '%s\n' "$file"
-          shasum -a 256 "$file"
-        done
+        find "$path" -type f ! -name '.env' ! -name '.env.*' -print0 \
+          | LC_ALL=C sort -z \
+          | xargs -0 shasum -a 256
       else
         shasum -a 256 "$path"
       fi
@@ -33,7 +35,12 @@ stargate_next_sha="$(
   fingerprint \
     apps/stargate-next/Dockerfile \
     apps/stargate-next/package.json \
+    pnpm-lock.yaml \
+    package.json \
+    pnpm-workspace.yaml \
     apps/stargate-next/dist \
+    packages/db \
+    packages/redis \
     packages/services/stargate
 )"
 
