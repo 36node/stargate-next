@@ -8,14 +8,7 @@ ENV PORT=9527
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nestjs
 
-COPY apps/stargate-next/dist ./dist
-COPY apps/stargate-next/node_modules ./apps/stargate-next/node_modules
-COPY node_modules ./node_modules
-COPY packages/db ./packages/db
-COPY packages/redis ./packages/redis
-COPY packages/services/stargate ./packages/services/stargate
-
-RUN chown -R nestjs:nodejs /app
+COPY --chown=nestjs:nodejs .docker/stargate-next ./
 
 USER nestjs
 

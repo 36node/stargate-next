@@ -6,8 +6,12 @@ variable "PLAYGROUND_TAGS" {
   default = ""
 }
 
+variable "DB_TAGS" {
+  default = ""
+}
+
 group "default" {
-  targets = ["stargate-next", "playground"]
+  targets = ["stargate-next", "playground", "db"]
 }
 
 target "stargate-next" {
@@ -20,4 +24,10 @@ target "playground" {
   context    = "."
   dockerfile = "apps/playground/Dockerfile"
   tags       = PLAYGROUND_TAGS != "" ? split("\n", trimspace(PLAYGROUND_TAGS)) : []
+}
+
+target "db" {
+  context    = "."
+  dockerfile = "packages/db/Dockerfile"
+  tags       = DB_TAGS != "" ? split("\n", trimspace(DB_TAGS)) : []
 }

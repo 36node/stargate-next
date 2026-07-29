@@ -10,10 +10,7 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY apps/playground/.next/standalone ./
-COPY apps/playground/.next/static ./apps/playground/.next/static
-
-RUN chown -R nextjs:nodejs /app
+COPY --chown=nextjs:nodejs .docker/playground ./
 
 USER nextjs
 

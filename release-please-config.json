@@ -12,6 +12,11 @@
     "apps/playground": {
       "package-name": "playground",
       "release-type": "node"
+    },
+    "packages/db": {
+      "component": "db",
+      "package-name": "@repo/db",
+      "release-type": "node"
     }
   }
 }

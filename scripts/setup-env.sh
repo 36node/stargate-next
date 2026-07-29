@@ -15,6 +15,11 @@ print_info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
+if [ "${CI:-}" = "true" ]; then
+  print_info "CI environment detected; skipping .env setup"
+  exit 0
+fi
+
 ROOT_ENV=".env"
 ROOT_ENV_EXAMPLE=".env.example"
 

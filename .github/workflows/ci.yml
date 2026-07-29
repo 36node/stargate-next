@@ -43,7 +43,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -76,11 +76,20 @@ jobs:
         run: |
           pnpm --filter stargate-next build
           pnpm --filter stargate-next start > /tmp/stargate-next.log 2>&1 &
+          stargate_pid=$!
+          trap 'kill "$stargate_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
-            curl --fail http://127.0.0.1:9527/health/ready && break
+            if ! kill -0 "$stargate_pid" 2>/dev/null; then
+              cat /tmp/stargate-next.log
+              exit 1
+            fi
+            curl --fail --silent http://127.0.0.1:9527/health/ready && break
             sleep 1
           done
-          curl --fail http://127.0.0.1:9527/health/ready
+          if ! curl --fail --silent http://127.0.0.1:9527/health/ready; then
+            cat /tmp/stargate-next.log
+            exit 1
+          fi
           pnpm --filter stargate-next test:api
           pnpm --filter stargate-next test:sdk
         env:
@@ -89,6 +98,7 @@ jobs:
           CAPTCHA_TEST_CODE: ABCD
           CAPTCHA_TEST_MODE: "true"
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+          NODE_ENV: test
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379
           REDIS_KEY_PREFIX: "stargate-next:ci-${{ github.run_id }}:"
@@ -103,6 +113,15 @@ jobs:
         env:
           NODE_ENV: production
           BUILD_STANDALONE: "true"
+      - name: Prepare DB production runtime
+        if: github.actor != 'dependabot[bot]'
+        run: bash scripts/prepare-db-runtime.sh
+      - name: Prepare Playground production runtime
+        if: github.actor != 'dependabot[bot]'
+        run: bash scripts/prepare-playground-runtime.sh
+      - name: Prepare Stargate Next production runtime
+        if: github.actor != 'dependabot[bot]'
+        run: bash scripts/prepare-stargate-next-runtime.sh
       - name: Set up Docker Buildx
         if: github.actor != 'dependabot[bot]'
         uses: docker/setup-buildx-action@v3
@@ -118,7 +137,7 @@ jobs:
       - name: Docker metadata for Stargate Next
         if: github.actor != 'dependabot[bot]'
         id: meta-stargate-next
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next
           tags: |
@@ -128,9 +147,19 @@ jobs:
       - name: Docker metadata for Playground
         if: github.actor != 'dependabot[bot]'
         id: meta-playground
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+      - name: Docker metadata for DB
+        if: github.actor != 'dependabot[bot]'
+        id: meta-db
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/db
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -145,8 +174,10 @@ jobs:
         env:
           STARGATE_NEXT_SHA: ${{ steps.image-fingerprints.outputs.stargate_next_sha }}
           PLAYGROUND_SHA: ${{ steps.image-fingerprints.outputs.playground_sha }}
+          DB_SHA: ${{ steps.image-fingerprints.outputs.db_sha }}
           STARGATE_NEXT_META_TAGS: ${{ steps.meta-stargate-next.outputs.tags }}
           PLAYGROUND_META_TAGS: ${{ steps.meta-playground.outputs.tags }}
+          DB_META_TAGS: ${{ steps.meta-db.outputs.tags }}
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
         run: |
@@ -176,6 +207,7 @@ jobs:
           targets=()
           plan_image "stargate-next" "stargate-next" "$STARGATE_NEXT_SHA" "$STARGATE_NEXT_META_TAGS" "stargate_next"
           plan_image "playground" "playground" "$PLAYGROUND_SHA" "$PLAYGROUND_META_TAGS" "playground"
+          plan_image "db" "db" "$DB_SHA" "$DB_META_TAGS" "db"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push image cache misses
         if: github.actor != 'dependabot[bot]' && steps.image-plan.outputs.bake_targets != ''
@@ -188,6 +220,7 @@ jobs:
         env:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
+          DB_TAGS: ${{ steps.image-plan.outputs.db_tags }}
       - name: Build summary
         if: always() && github.actor != 'dependabot[bot]'
         run: |
@@ -198,6 +231,7 @@ jobs:
             echo "| --- | --- | --- |"
             echo "| Stargate Next | \`${{ steps.image-plan.outputs.stargate_next_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/stargate-next:${{ steps.meta-stargate-next.outputs.version }}\` |"
             echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground:${{ steps.meta-playground.outputs.version }}\` |"
+            echo "| DB | \`${{ steps.image-plan.outputs.db_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/db:${{ steps.meta-db.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build-helm-chart:
@@ -207,7 +241,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -270,8 +304,8 @@ jobs:
           helm package "$chart_dir" --version "$branch_version" --destination "$destination"
           helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
 
-          helm push "${destination}/stargate-next-${branch_version}.tgz" "$repository"
-          helm push "${destination}/stargate-next-${fingerprint_version}.tgz" "$repository"
+          helm push "${destination}/stargate-chart-${branch_version}.tgz" "$repository"
+          helm push "${destination}/stargate-chart-${fingerprint_version}.tgz" "$repository"
         env:
           CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
 
@@ -281,7 +315,7 @@ jobs:
     if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: arc-runners-mekong
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build notification content
         id: notify
         uses: ./.github/actions/ci-notify-content

@@ -22,8 +22,10 @@ jobs:
       stargate_next_tag: ${{ steps.release.outputs['apps/stargate-next--tag_name'] }}
       playground_released: ${{ steps.release.outputs['apps/playground--release_created'] }}
       playground_tag: ${{ steps.release.outputs['apps/playground--tag_name'] }}
+      db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
+      db_tag: ${{ steps.release.outputs['packages/db--tag_name'] }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
@@ -35,7 +37,7 @@ jobs:
     runs-on: arc-runners-haivivi
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install dependencies
@@ -45,6 +47,12 @@ jobs:
         env:
           NODE_ENV: production
           BUILD_STANDALONE: "true"
+      - name: Prepare DB production runtime
+        run: bash scripts/prepare-db-runtime.sh
+      - name: Prepare Playground production runtime
+        run: bash scripts/prepare-playground-runtime.sh
+      - name: Prepare Stargate Next production runtime
+        run: bash scripts/prepare-stargate-next-runtime.sh
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
@@ -60,6 +68,8 @@ jobs:
           STARGATE_NEXT_TAG: ${{ needs.release-please.outputs.stargate_next_tag }}
           PLAYGROUND_RELEASED: ${{ needs.release-please.outputs.playground_released }}
           PLAYGROUND_TAG: ${{ needs.release-please.outputs.playground_tag }}
+          DB_RELEASED: ${{ needs.release-please.outputs.db_released }}
+          DB_TAG: ${{ needs.release-please.outputs.db_tag }}
         run: |
           set -euo pipefail
           targets=()
@@ -84,6 +94,7 @@ jobs:
           }
           plan_image "stargate-next" "stargate-next" "stargate-next" "$STARGATE_NEXT_RELEASED" "$STARGATE_NEXT_TAG" "stargate_next_tags"
           plan_image "playground" "playground" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
+          plan_image "db" "db" "db" "$DB_RELEASED" "$DB_TAG" "db_tags"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push release images
         if: steps.image-plan.outputs.bake_targets != ''
@@ -96,3 +107,4 @@ jobs:
         env:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
+          DB_TAGS: ${{ steps.image-plan.outputs.db_tags }}

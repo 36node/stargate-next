@@ -1,5 +1,5 @@
 apiVersion: v2
-name: stargate-next
+name: stargate-chart
 description: Deploys Stargate Next and its Playground
 type: application
 version: 0.1.0

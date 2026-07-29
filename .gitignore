@@ -289,4 +289,6 @@ packages/db/generated
 # pnpm store
 .pnpm-store
 
+/.docker
+
 /data

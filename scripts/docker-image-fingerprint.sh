@@ -34,24 +34,30 @@ fingerprint() {
 stargate_next_sha="$(
   fingerprint \
     apps/stargate-next/Dockerfile \
+    scripts/prepare-stargate-next-runtime.sh \
     apps/stargate-next/package.json \
     pnpm-lock.yaml \
     package.json \
     pnpm-workspace.yaml \
-    apps/stargate-next/dist \
-    packages/db \
-    packages/redis \
-    packages/services/stargate
+    .docker/stargate-next
 )"
 
 playground_sha="$(
   fingerprint \
     apps/playground/Dockerfile \
-    apps/playground/.next/standalone \
-    apps/playground/.next/static
+    scripts/prepare-playground-runtime.sh \
+    .docker/playground
+)"
+
+db_sha="$(
+  fingerprint \
+    packages/db/Dockerfile \
+    scripts/prepare-db-runtime.sh \
+    .docker/db
 )"
 
 cat <<EOF
 stargate_next_sha=$stargate_next_sha
 playground_sha=$playground_sha
+db_sha=$db_sha
 EOF
