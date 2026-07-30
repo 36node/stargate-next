@@ -672,6 +672,8 @@ jobs:
 
           if [ "$http_code" = "201" ] || [ "$http_code" = "200" ]; then
             echo "Init account created (HTTP $http_code)"
+          elif [ "$http_code" = "409" ]; then
+            echo "Init account already exists, skipping (HTTP $http_code)"
           else
             cat /tmp/seed-response.json
             echo "::error::Create account failed with HTTP $http_code"
