@@ -83,12 +83,12 @@ imagePullSecrets:
 Return the Stargate Next service name.
 */}}
 {{- define "stargate-next.serviceName" -}}
-{{- printf "%s-stargate-next" (include "stargate-next.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- "stargate-next" }}
 {{- end }}
 
 {{/*
 Return the Playground service name.
 */}}
 {{- define "stargate-next.playgroundServiceName" -}}
-{{- printf "%s-playground" (include "stargate-next.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- "playground" }}
 {{- end }}

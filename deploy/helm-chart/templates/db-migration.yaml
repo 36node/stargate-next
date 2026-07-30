@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ include "stargate-next.fullname" . }}-migration
+  name: db-migration
   labels:
     {{- include "stargate-next.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
@@ -13,7 +13,7 @@ stringData:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "stargate-next.fullname" . }}-migration-{{ .Release.Revision }}
+  name: db-migration-{{ .Release.Revision }}
   labels:
     {{- include "stargate-next.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
@@ -36,7 +36,7 @@ spec:
           command: ["sh", "-c", "prisma migrate deploy"]
           envFrom:
             - secretRef:
-                name: {{ include "stargate-next.fullname" . }}-migration
+                name: db-migration
           resources:
             {{- toYaml .Values.db.migration.resources | nindent 12 }}
 {{- end }}

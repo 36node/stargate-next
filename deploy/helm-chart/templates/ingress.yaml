@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "stargate-next.fullname" . }}
+  name: stargate-next
   labels:
     {{- include "stargate-next.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
