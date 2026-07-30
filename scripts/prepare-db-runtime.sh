@@ -10,7 +10,7 @@ test -f packages/db/prisma.config.ts
 test -f packages/db/studio-proxy.ts
 
 rm -rf "$OUTPUT_DIR"
-CI=true pnpm --filter @repo/db deploy --legacy "$OUTPUT_DIR"
+CI=true PRISMA_CLI_BINARY_TARGETS="linux-musl-openssl-3.0.x" pnpm --filter @repo/db deploy --legacy "$OUTPUT_DIR"
 pnpm --filter @repo/db exec tsup studio-proxy.ts \
   --format esm \
   --out-dir "$OUTPUT_DIR/dist" \
