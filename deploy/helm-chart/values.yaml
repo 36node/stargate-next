@@ -70,6 +70,17 @@ playground:
   tolerations: []
   affinity: {}
 
+db:
+  migration:
+    enabled: true
+    image:
+      repository: stargate/db
+      tag: main
+      digest: ""
+      pullPolicy: ""
+      pullSecrets: []
+    resources: {}
+
 ingress:
   enabled: false
   className: ""
