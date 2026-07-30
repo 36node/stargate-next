@@ -178,12 +178,12 @@ jobs:
         run: bash scripts/prepare-stargate-next-runtime.sh
       - name: Set up Docker Buildx
         if: github.actor != 'dependabot[bot]'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker-container
       - name: Login to Harbor
         if: github.actor != 'dependabot[bot]'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.HARBOR_DOMAIN }}
           username: ${{ secrets.HARBOR_USERNAME }}
@@ -266,7 +266,7 @@ jobs:
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push image cache misses
         if: github.actor != 'dependabot[bot]' && steps.image-plan.outputs.bake_targets != ''
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@v7
         with:
           source: .
           files: docker-bake.hcl
@@ -338,7 +338,7 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Login to Harbor
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.HARBOR_DOMAIN }}
           username: ${{ secrets.HARBOR_USERNAME }}
@@ -637,6 +637,48 @@ jobs:
           else
             fail "Deploy task $task_id finished with status: ${status:-unknown}"
           fi
+
+      - name: Seed init account
+        if: ${{ steps.deploy.outputs.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$STARGATE_API_KEY" ]; then
+            echo "::error::STARGATE_API_KEY secret is required for seed"
+            exit 1
+          fi
+
+          API_URL="${{ steps.deploy-context.outputs.api_url }}"
+          echo "Waiting for API to be ready at $API_URL/health/ready"
+          for i in $(seq 1 30); do
+            if curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          if ! curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
+            echo "::error::API health check failed after deploy"
+            exit 1
+          fi
+
+          echo "Creating init account (username=stargate)..."
+          suffix="$(date +%s)"
+          http_code="$(curl -sS -o /tmp/seed-response.json -w '%{http_code}' \
+            -X POST "$API_URL/v1/accounts" \
+            -H "x-api-key: $STARGATE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"idempotencyKey\":\"seed-stargate-${suffix}\",\"password\":\"stargate@36node\",\"username\":\"stargate\"}")"
+
+          if [ "$http_code" = "201" ] || [ "$http_code" = "200" ]; then
+            echo "Init account created (HTTP $http_code)"
+          else
+            cat /tmp/seed-response.json
+            echo "::error::Create account failed with HTTP $http_code"
+            exit 1
+          fi
+        env:
+          STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
 
       - name: Comment PR deploy URLs
         if: github.event_name == 'pull_request'
