@@ -1,27 +1,27 @@
 name: 'Feishu Reply Message'
-description: '回复飞书消息（在话题内）'
+description: 'Reply to a Feishu message, optionally in the message thread'
 
 inputs:
   app_id:
-    description: '飞书应用 App ID'
+    description: 'Feishu app ID'
     required: true
   app_secret:
-    description: '飞书应用 App Secret'
+    description: 'Feishu app secret'
     required: true
   message_id:
-    description: '要回复的消息 ID'
+    description: 'Message ID to reply to'
     required: true
   content:
-    description: '回复内容（文本）'
+    description: 'Reply content as text'
     required: true
   reply_in_thread:
-    description: '是否在话题内回复'
+    description: 'Whether to reply in thread'
     required: false
     default: 'true'
 
 outputs:
   message_id:
-    description: '回复消息的 ID'
+    description: 'Reply message ID returned by Feishu'
     value: ${{ steps.reply.outputs.message_id }}
 
 runs:
@@ -34,16 +34,25 @@ runs:
         APP_ID: ${{ inputs.app_id }}
         APP_SECRET: ${{ inputs.app_secret }}
       run: |
-        RESPONSE=$(curl -s -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
-          -H 'Content-Type: application/json' \
-          -d "{\"app_id\": \"${APP_ID}\", \"app_secret\": \"${APP_SECRET}\"}")
+        set -euo pipefail
 
-        TOKEN=$(echo "$RESPONSE" | jq -r '.tenant_access_token')
-        if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
-          echo "::error::Failed to get Feishu token: $RESPONSE"
+        request_body="$(jq -n \
+          --arg app_id "$APP_ID" \
+          --arg app_secret "$APP_SECRET" \
+          '{app_id: $app_id, app_secret: $app_secret}')"
+
+        response="$(curl -sS -X POST 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal' \
+          -H 'Content-Type: application/json' \
+          -d "$request_body")"
+
+        token="$(echo "$response" | jq -r '.tenant_access_token // empty')"
+        if [ -z "$token" ]; then
+          echo "::error::Failed to get Feishu token: $response"
           exit 1
         fi
-        echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+        echo "::add-mask::$token"
+        echo "token=$token" >> "$GITHUB_OUTPUT"
 
     - name: Reply message
       id: reply
@@ -54,19 +63,25 @@ runs:
         CONTENT: ${{ inputs.content }}
         REPLY_IN_THREAD: ${{ inputs.reply_in_thread }}
       run: |
-        MSG_CONTENT=$(jq -n --arg text "$CONTENT" '{"text": $text}')
-        THREAD_FLAG=$([ "$REPLY_IN_THREAD" = "true" ] && echo "true" || echo "false")
-        REQUEST_BODY=$(jq -n --arg content "$MSG_CONTENT" --argjson thread "$THREAD_FLAG" '{"msg_type": "text", "content": $content, "reply_in_thread": $thread}')
+        set -euo pipefail
 
-        RESPONSE=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages/${MESSAGE_ID}/reply" \
+        msg_content="$(jq -n --arg text "$CONTENT" '{text: $text}')"
+        thread_flag="$([ "$REPLY_IN_THREAD" = "true" ] && echo "true" || echo "false")"
+        request_body="$(jq -n \
+          --arg content "$msg_content" \
+          --argjson reply_in_thread "$thread_flag" \
+          '{msg_type: "text", content: $content, reply_in_thread: $reply_in_thread}')"
+
+        response="$(curl -sS -X POST "https://open.feishu.cn/open-apis/im/v1/messages/${MESSAGE_ID}/reply" \
           -H "Authorization: Bearer $FEISHU_TOKEN" \
           -H 'Content-Type: application/json' \
-          -d "$REQUEST_BODY")
+          -d "$request_body")"
 
-        REPLY_ID=$(echo "$RESPONSE" | jq -r '.data.message_id')
-        if [ "$REPLY_ID" = "null" ] || [ -z "$REPLY_ID" ]; then
-          echo "::warning::Failed to reply Feishu message: $RESPONSE"
-        else
-          echo "message_id=$REPLY_ID" >> $GITHUB_OUTPUT
-          echo "Replied with message ID: $REPLY_ID"
+        reply_id="$(echo "$response" | jq -r '.data.message_id // empty')"
+        if [ -z "$reply_id" ]; then
+          echo "::error::Failed to reply Feishu message: $response"
+          exit 1
         fi
+
+        echo "message_id=$reply_id" >> "$GITHUB_OUTPUT"
+        echo "Replied with Feishu message ID: $reply_id"

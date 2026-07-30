@@ -12,11 +12,65 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: read
+  pull-requests: write
+  issues: write
+
 env:
+  CYCLOPS_BASE_URL: ${{ secrets.CYCLOPS_BASE_URL }}
   HARBOR_DOMAIN: harbor.36node.com
   HARBOR_PROJECT: stargate
 
 jobs:
+  notify-main-updated:
+    name: Notify main updated
+    if: ${{ github.actor != 'dependabot[bot]' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: arc-runners-mekong
+    timeout-minutes: 5
+    outputs:
+      message_id: ${{ steps.create-thread.outputs.message_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Build main update content
+        id: main-content
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          short_sha="${HEAD_SHA:0:7}"
+          post_content="$(jq -cn \
+            --arg short_sha "$short_sha" \
+            '{
+              zh_cn: {
+                title: "stargate-next main 分支已更新",
+                content: [[{
+                  tag: "text",
+                  text: "提交: \($short_sha)"
+                }]]
+              }
+            }')"
+
+          echo "content=$post_content" >> "$GITHUB_OUTPUT"
+
+      - name: Create Feishu thread
+        id: create-thread
+        uses: ./.github/actions/feishu-send
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          chat_id: ${{ secrets.FEISHU_CHAT_ID }}
+          msg_type: post
+          content: ${{ steps.main-content.outputs.content }}
+          uuid: main-${{ github.sha }}
+
   test-and-build:
     name: Test and build
     runs-on: arc-runners-mekong
@@ -194,6 +248,7 @@ jobs:
             echo "${output}_tags<<EOF" >> "$GITHUB_OUTPUT"
             printf '%s\n' "$tags" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "${output}_fingerprint_tag=${fingerprint_tag}" >> "$GITHUB_OUTPUT"
             if docker buildx imagetools inspect "$fingerprint_tag" >/dev/null 2>&1; then
               while IFS= read -r tag; do
                 [ -z "$tag" ] || docker buildx imagetools create -t "$tag" "$fingerprint_tag"
@@ -233,6 +288,42 @@ jobs:
             echo "| Playground | \`${{ steps.image-plan.outputs.playground_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/playground:${{ steps.meta-playground.outputs.version }}\` |"
             echo "| DB | \`${{ steps.image-plan.outputs.db_status || 'not-planned' }}\` | \`${{ env.HARBOR_DOMAIN }}/${{ env.HARBOR_PROJECT }}/db:${{ steps.meta-db.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Write deploy image metadata
+        if: github.actor != 'dependabot[bot]'
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/deploy-images"
+
+          write_metadata() {
+            local image="$1"
+            local fingerprint_tag="$2"
+
+            if [ -z "$fingerprint_tag" ]; then
+              echo "::error::Missing fingerprint tag for ${image}"
+              exit 1
+            fi
+
+            local image_tag="${fingerprint_tag##*:}"
+
+            {
+              echo "image=${image}"
+              echo "tag=${image_tag}"
+              echo "fingerprint_tag=${fingerprint_tag}"
+            } > "$RUNNER_TEMP/deploy-images/${image}.env"
+          }
+
+          write_metadata "stargate-next" "${{ steps.image-plan.outputs.stargate_next_fingerprint_tag }}"
+          write_metadata "playground" "${{ steps.image-plan.outputs.playground_fingerprint_tag }}"
+          write_metadata "db" "${{ steps.image-plan.outputs.db_fingerprint_tag }}"
+      - name: Upload deploy image metadata
+        if: github.actor != 'dependabot[bot]'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-image-metadata
+          path: ${{ runner.temp }}/deploy-images/
+          retention-days: 1
+          if-no-files-found: error
 
   build-helm-chart:
     name: Build Helm chart
@@ -309,32 +400,411 @@ jobs:
         env:
           CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
 
-
-  notify:
+  deploy:
+    name: Deploy
     needs: [test-and-build, build-helm-chart]
-    if: ${{ always() && github.actor != 'dependabot[bot]' }}
+    if: >-
+      ${{
+        always() &&
+        github.actor != 'dependabot[bot]' &&
+        (
+          github.event_name == 'pull_request' ||
+          (
+            github.ref == 'refs/heads/main' &&
+            (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          )
+        ) &&
+        needs['test-and-build'].result == 'success' &&
+        (
+          github.event_name == 'pull_request' ||
+          needs['build-helm-chart'].result == 'success'
+        )
+      }}
     runs-on: arc-runners-mekong
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v7
-      - name: Build notification content
-        id: notify
-        uses: ./.github/actions/ci-notify-content
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
-          test_and_build_result: ${{ needs['test-and-build'].result }}
-          build_helm_chart_result: ${{ needs['build-helm-chart'].result }}
-          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      - name: Send UAT notification
-        if: ${{ github.event_name == 'push' }}
-        uses: ./.github/actions/feishu-send
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Download deploy image metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-image-metadata
+          path: ${{ runner.temp }}/deploy-images
+
+      - name: Resolve deploy context
+        id: deploy-context
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            deploy_name="pr-${{ github.event.pull_request.number }}"
+            url_scheme="http"
+          else
+            deploy_name="uat"
+            url_scheme="https"
+          fi
+
+          app_id="stargate-next-${deploy_name}"
+          domain="stargate-next-${deploy_name}.36node.com"
+
+          echo "deploy_name=${deploy_name}" >> "$GITHUB_OUTPUT"
+          echo "app_id=${app_id}" >> "$GITHUB_OUTPUT"
+          echo "domain=${domain}" >> "$GITHUB_OUTPUT"
+          echo "api_url=${url_scheme}://api.${domain}" >> "$GITHUB_OUTPUT"
+          echo "playground_url=${url_scheme}://playground.${domain}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract env from PR body
+        if: github.event_name == 'pull_request'
+        id: pr-env
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const body = process.env.PR_BODY || '';
+          const envs = {};
+
+          for (const line of body.split(/\r?\n/)) {
+            const match = line.match(/^\s*\+env:([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$/);
+            if (match) {
+              envs[match[1]] = match[2];
+            }
+          }
+
+          console.log(`env=${JSON.stringify(envs)}`);
+          NODE
+
+      - name: Read deploy image tags
+        id: deploy-images
+        run: |
+          set -euo pipefail
+
+          metadata_dir="$RUNNER_TEMP/deploy-images"
+
+          read_tag() {
+            local image="$1"
+            local file="${metadata_dir}/${image}.env"
+
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing deploy metadata for ${image}"
+              exit 1
+            fi
+
+            node - "$file" <<'NODE'
+          const fs = require('fs');
+          const file = process.argv[2];
+          const tagLine = fs.readFileSync(file, 'utf8')
+            .split(/\r?\n/)
+            .find((line) => line.startsWith('tag='));
+
+          if (!tagLine) {
+            console.error(`Missing tag in ${file}`);
+            process.exit(1);
+          }
+
+          process.stdout.write(tagLine.slice('tag='.length));
+          NODE
+          }
+
+          echo "stargate_next_tag=$(read_tag stargate-next)" >> "$GITHUB_OUTPUT"
+          echo "playground_tag=$(read_tag playground)" >> "$GITHUB_OUTPUT"
+          echo "db_tag=$(read_tag db)" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert Stargate Next app settings
+        env:
+          DEPLOY_NAME: ${{ steps.deploy-context.outputs.deploy_name }}
+          APP_ID: ${{ steps.deploy-context.outputs.app_id }}
+          PR_ENV_JSON: ${{ steps.pr-env.outputs.env || '{}' }}
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          deploy_upper="$(echo "$DEPLOY_NAME" | tr '[:lower:]' '[:upper:]')"
+
+          sed -e "s/{{deploy}}/${DEPLOY_NAME}/g" \
+              -e "s/{{deploy *| *uppercase}}/${deploy_upper}/g" \
+            .github/workflows/stargate-next-app-settings.json > /tmp/app-settings.json
+
+          jq --argjson envs "$PR_ENV_JSON" \
+            '.playbook.extraVars += ($envs | with_entries(.value = {default: (.value | tostring), overridable: true}))' \
+            /tmp/app-settings.json > /tmp/app-settings.final.json
+
+          http_code="$(curl -sS -o /tmp/upsert-response.json -w '%{http_code}' \
+            -X PUT "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/app-settings.final.json)"
+
+          if [ "$http_code" != "200" ] && [ "$http_code" != "201" ]; then
+            cat /tmp/upsert-response.json
+            echo "::error::Upsert app settings failed with HTTP $http_code"
+            exit 1
+          fi
+
+          echo "App settings $APP_ID upserted (HTTP $http_code)"
+
+      - name: Deploy
+        id: deploy
+        env:
+          APP_ID: ${{ steps.deploy-context.outputs.app_id }}
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+          STARGATE_NEXT_TAG: ${{ steps.deploy-images.outputs.stargate_next_tag }}
+          PLAYGROUND_TAG: ${{ steps.deploy-images.outputs.playground_tag }}
+          DB_TAG: ${{ steps.deploy-images.outputs.db_tag }}
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          http_code="$(curl -sS -o /tmp/hooks.json -w '%{http_code}' \
+            "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID/hooks" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN")"
+
+          if [ "$http_code" != "200" ]; then
+            cat /tmp/hooks.json
+            fail "Get webhook token failed with HTTP $http_code"
+          fi
+
+          token="$(jq -r '.token' /tmp/hooks.json)"
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            fail "Webhook token missing in hooks response"
+          fi
+          echo "::add-mask::$token"
+
+          jq -n \
+            --arg stargate_next "$STARGATE_NEXT_TAG" \
+            --arg playground "$PLAYGROUND_TAG" \
+            --arg db "$DB_TAG" \
+            '{
+              overrides: {
+                stargate_next_tag: $stargate_next,
+                stargate_next_playground_tag: $playground,
+                stargate_next_db_tag: $db
+              }
+            }' > /tmp/deploy-overrides.json
+
+          http_code="$(curl -sS -o /tmp/deploy-trigger.json -w '%{http_code}' \
+            -X POST "$CYCLOPS_BASE_URL/api/hooks/$token/deploy" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/deploy-overrides.json)"
+
+          if [ "$http_code" != "202" ]; then
+            cat /tmp/deploy-trigger.json
+            fail "Trigger deploy failed with HTTP $http_code"
+          fi
+
+          task_id="$(jq -r '.task.id' /tmp/deploy-trigger.json)"
+          if [ -z "$task_id" ] || [ "$task_id" = "null" ]; then
+            fail "Task id missing in deploy trigger response"
+          fi
+
+          status_url="$CYCLOPS_BASE_URL/api/hooks/$token/tasks/$task_id"
+          logs_url="$status_url/logs"
+
+          echo "Streaming deploy logs for task $task_id"
+          timeout 1500 curl -NsS "$logs_url" | {
+            current=""
+            while IFS= read -r line; do
+              case "$line" in
+                "event: "*) current="${line#event: }" ;;
+                "data: "*)  if [ "$current" = "log" ]; then printf '%s\n' "${line#data: }"; fi ;;
+                "data:"*)   if [ "$current" = "log" ]; then printf '%s\n' "${line#data:}"; fi ;;
+              esac
+            done
+          } || echo "::warning::Log stream ended unexpectedly"
+
+          status=""
+          for _ in $(seq 1 60); do
+            status="$(curl -fsS "$status_url" | jq -r '.status' || echo '')"
+            case "$status" in
+              SUCCEEDED|ERROR) break ;;
+            esac
+            echo "Task status: ${status:-unknown}; waiting..."
+            sleep 10
+          done
+
+          if [ "$status" = "SUCCEEDED" ]; then
+            echo "Deploy task $task_id succeeded"
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+          else
+            fail "Deploy task $task_id finished with status: ${status:-unknown}"
+          fi
+
+      - name: Comment PR deploy URLs
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          API_URL: ${{ steps.deploy-context.outputs.api_url }}
+          PLAYGROUND_URL: ${{ steps.deploy-context.outputs.playground_url }}
+        with:
+          script: |
+            const deployMarker = '<!-- stargate-next-deploy-urls -->';
+            const feishuMarker = '<!-- feishu_message_id:';
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => (
+              comment.user?.type === 'Bot' &&
+              (
+                comment.body?.includes(deployMarker) ||
+                comment.body?.includes(feishuMarker)
+              )
+            ));
+            const feishuMatch = existing?.body?.match(/<!-- feishu_message_id: ([\w-]+) -->/);
+            const body = [
+              feishuMatch?.[0],
+              deployMarker,
+              '访问地址:',
+              '',
+              `* API: ${process.env.API_URL}`,
+              `* Playground: ${process.env.PLAYGROUND_URL}`,
+            ].filter(Boolean).join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  notify-feishu-deploy:
+    name: Notify Feishu PR deploy
+    needs: [deploy]
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'pull_request' &&
+        github.actor != 'dependabot[bot]' &&
+        needs.deploy.result == 'success'
+      }}
+    runs-on: arc-runners-mekong
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Get Feishu message ID from PR comments
+        id: pr-comments
+        uses: ./.github/actions/pr-comment-data
+        with:
+          pattern: '<!-- feishu_message_id: ([\w-]+) -->'
+
+      - name: Build deploy notification content
+        if: steps.pr-comments.outputs.found == 'true'
+        id: notify-content
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          API_URL: http://api.stargate-next-pr-${{ github.event.pull_request.number }}.36node.com
+          PLAYGROUND_URL: http://playground.stargate-next-pr-${{ github.event.pull_request.number }}.36node.com
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          short_sha="${HEAD_SHA:0:7}"
+          {
+            echo 'content<<EOF'
+            printf 'PR #%s 部署成功（Commit: %s）\n' "$PR_NUMBER" "$short_sha"
+            printf '\n'
+            printf '访问地址：\n'
+            printf -- '- API：%s\n' "$API_URL"
+            printf -- '- Playground：%s\n' "$PLAYGROUND_URL"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reply Feishu thread
+        if: steps.pr-comments.outputs.found == 'true'
+        uses: ./.github/actions/feishu-reply
         with:
           app_id: ${{ secrets.FEISHU_APP_ID }}
           app_secret: ${{ secrets.FEISHU_APP_SECRET }}
-          chat_id: ${{ secrets.FEISHU_CHAT_ID }}
-          msg_type: text
-          content: ${{ steps.notify.outputs.content }}
-      - name: Comment pull request
-        if: ${{ github.event_name == 'pull_request' }}
-        uses: thollander/actions-comment-pull-request@v3
+          message_id: ${{ steps.pr-comments.outputs.value }}
+          content: ${{ steps.notify-content.outputs.content }}
+
+      - name: Skip missing Feishu thread
+        if: steps.pr-comments.outputs.found != 'true'
+        run: |
+          echo "::warning::Feishu message ID marker was not found; skipping deploy notification."
+
+  notify-feishu-uat-deploy:
+    name: Notify Feishu UAT deploy
+    needs: [notify-main-updated, deploy]
+    if: >-
+      ${{
+        always() &&
+        github.ref == 'refs/heads/main' &&
+        (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+        github.actor != 'dependabot[bot]' &&
+        needs['notify-main-updated'].result == 'success' &&
+        needs['notify-main-updated'].outputs.message_id != '' &&
+        needs.deploy.result != 'skipped' &&
+        needs.deploy.result != 'cancelled'
+      }}
+    runs-on: arc-runners-mekong
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
-          message: ${{ steps.notify.outputs.content }}
-          comment-tag: ci-results
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Build UAT deploy notification content
+        id: notify-content
+        env:
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          API_URL: https://api.stargate-next-uat.36node.com
+          PLAYGROUND_URL: https://playground.stargate-next-uat.36node.com
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          short_sha="${HEAD_SHA:0:7}"
+          {
+            echo 'content<<EOF'
+            if [ "$DEPLOY_RESULT" = "success" ]; then
+              printf 'UAT 部署成功（Commit: %s）\n' "$short_sha"
+              printf '\n'
+              printf '访问地址：\n'
+              printf -- '- API：%s\n' "$API_URL"
+              printf -- '- Playground：%s\n' "$PLAYGROUND_URL"
+            else
+              printf 'UAT 部署失败（Commit: %s）\n' "$short_sha"
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Reply Feishu thread
+        uses: ./.github/actions/feishu-reply
+        with:
+          app_id: ${{ secrets.FEISHU_APP_ID }}
+          app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          message_id: ${{ needs['notify-main-updated'].outputs.message_id }}
+          content: ${{ steps.notify-content.outputs.content }}

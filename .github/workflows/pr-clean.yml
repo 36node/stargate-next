@@ -1,0 +1,169 @@
+name: Clean PR deployments
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  DEPLOY: pr-${{ github.event.pull_request.number }}
+  CYCLOPS_BASE_URL: ${{ secrets.CYCLOPS_BASE_URL }}
+
+jobs:
+  clean:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: arc-runners-mekong
+    timeout-minutes: 30
+
+    steps:
+      - name: Clean PR deployments
+        id: clean
+        env:
+          CYCLOPS_CI_RUNNER_API_TOKEN: ${{ secrets.CYCLOPS_CI_RUNNER_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          APP_ID="stargate-next-${DEPLOY}"
+
+          fail() {
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          delete_app() {
+            local http_code
+            http_code="$(curl -sS -o /tmp/delete-response.json -w '%{http_code}' \
+              -X DELETE "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID" \
+              -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN")"
+
+            if [ "$http_code" != "204" ] && [ "$http_code" != "404" ]; then
+              cat /tmp/delete-response.json
+              fail "Delete app config failed with HTTP $http_code"
+            fi
+
+            echo "App config $APP_ID deleted (HTTP $http_code)"
+          }
+
+          http_code="$(curl -sS -o /tmp/hooks.json -w '%{http_code}' \
+            "$CYCLOPS_BASE_URL/api/settings/applications/$APP_ID/hooks" \
+            -H "Authorization: Bearer $CYCLOPS_CI_RUNNER_API_TOKEN")"
+
+          if [ "$http_code" = "404" ]; then
+            echo "App $APP_ID not found; nothing to clean"
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$http_code" != "200" ]; then
+            cat /tmp/hooks.json
+            fail "Get webhook token failed with HTTP $http_code"
+          fi
+
+          token="$(jq -r '.token' /tmp/hooks.json)"
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            fail "Webhook token missing in hooks response"
+          fi
+          echo "::add-mask::$token"
+
+          http_code="$(curl -sS -o /tmp/uninstall-trigger.json -w '%{http_code}' \
+            -X POST "$CYCLOPS_BASE_URL/api/hooks/$token/uninstall")"
+
+          if [ "$http_code" = "409" ] && \
+             [ "$(jq -r '.code' /tmp/uninstall-trigger.json)" = "APPLICATION_NOT_INSTALLED" ]; then
+            echo "App $APP_ID not installed; deleting app config only"
+            delete_app
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$http_code" != "202" ]; then
+            cat /tmp/uninstall-trigger.json
+            fail "Trigger uninstall failed with HTTP $http_code"
+          fi
+
+          task_id="$(jq -r '.task.id' /tmp/uninstall-trigger.json)"
+          if [ -z "$task_id" ] || [ "$task_id" = "null" ]; then
+            fail "Task id missing in uninstall trigger response"
+          fi
+
+          status_url="$CYCLOPS_BASE_URL/api/hooks/$token/tasks/$task_id"
+          logs_url="$status_url/logs"
+
+          echo "Streaming uninstall logs for task $task_id"
+          timeout 1500 curl -NsS "$logs_url" | {
+            current=""
+            while IFS= read -r line; do
+              case "$line" in
+                "event: "*) current="${line#event: }" ;;
+                "data: "*)  if [ "$current" = "log" ]; then printf '%s\n' "${line#data: }"; fi ;;
+                "data:"*)   if [ "$current" = "log" ]; then printf '%s\n' "${line#data:}"; fi ;;
+              esac
+            done
+          } || echo "::warning::Log stream ended unexpectedly"
+
+          status=""
+          for _ in $(seq 1 60); do
+            status="$(curl -fsS "$status_url" | jq -r '.status' || echo '')"
+            case "$status" in
+              SUCCEEDED|ERROR) break ;;
+            esac
+            echo "Task status: ${status:-unknown}; waiting..."
+            sleep 10
+          done
+
+          if [ "$status" != "SUCCEEDED" ]; then
+            fail "Uninstall task $task_id finished with status: ${status:-unknown}"
+          fi
+
+          echo "Uninstall task $task_id succeeded"
+          delete_app
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+
+      - name: Comment PR cleanup result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CLEAN_OUTCOME: ${{ steps.clean.outputs.outcome }}
+        with:
+          script: |
+            const marker = '<!-- stargate-next-pr-clean -->';
+            const success = process.env.CLEAN_OUTCOME === 'success';
+            const body = [
+              marker,
+              success
+                ? 'PR closed; deployment environment has been cleaned.'
+                : 'PR closed; deployment environment cleanup failed.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => (
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            ));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
