@@ -6,10 +6,6 @@ metadata:
   labels:
     {{- include "stargate-next.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-2"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 type: Opaque
 stringData:
   DATABASE_URL: {{ .Values.stargateNext.secrets.databaseUrl | quote }}
@@ -21,12 +17,8 @@ metadata:
   labels:
     {{- include "stargate-next.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
-  annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-1"
-    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  backoffLimit: 1
+  backoffLimit: 3
   activeDeadlineSeconds: 300
   ttlSecondsAfterFinished: 3600
   template:
