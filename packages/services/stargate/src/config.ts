@@ -1,6 +1,7 @@
 const CAPTCHA_TEST_CODE_PATTERN = /^[A-Z0-9]{4}$/;
 
 export type StargateConfig = {
+  accountCreateIdempotencyTtlSeconds: number;
   apiKey: string;
   captchaAttempts: number;
   captchaCreateLimit: number;
@@ -85,6 +86,11 @@ export function loadStargateConfig(
     );
   }
   return {
+    accountCreateIdempotencyTtlSeconds: positiveInteger(
+      environment,
+      "ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS",
+      "3600"
+    ),
     apiKey: required(environment, "STARGATE_API_KEY"),
     captchaAttempts: positiveInteger(environment, "CAPTCHA_MAX_ATTEMPTS", "5"),
     captchaCreateLimit: positiveInteger(

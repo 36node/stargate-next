@@ -422,18 +422,12 @@ export class StargateService implements StargateServiceContract {
     return result === 1;
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bootstrap code not fine tuned for complexity.
   async createAccount(
     input: AccountInput,
     context: RequestContext
   ): Promise<PublicAccount> {
-    const idempotencyKey = input.idempotencyKey?.trim();
-    if (!idempotencyKey) {
-      throw serviceError(
-        "IDEMPOTENCY_KEY_INVALID",
-        "idempotencyKey is required",
-        "invalid_argument"
-      );
-    }
+    const idempotencyKey = input.idempotencyKey?.trim() || undefined;
     requiredString(input.password, "password");
     const data = {
       active: input.active !== false,
@@ -447,83 +441,103 @@ export class StargateService implements StargateServiceContract {
           : normalizePhone(input.phone),
       username: normalizeUsername(input.username),
     };
-    const requestHash = createHash("sha256")
-      .update(JSON.stringify(data))
-      .digest("hex");
-    const expiresAt = new Date(Date.now() + 86_400_000);
-    const create = () =>
-      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotency transaction must remain atomic.
-      db.$transaction(async (transaction) => {
-        const existing = await transaction.accountCreateIdempotency.findUnique({
-          include: { account: true },
-          where: { key: idempotencyKey },
-        });
-        if (existing && existing.expiresAt > new Date()) {
-          if (existing.requestHash !== requestHash) {
+    const accountData = {
+      email: data.email,
+      passwordAlgorithm: "legacy-md5" as const,
+      passwordChangedAt: new Date(),
+      passwordHash: passwordHash(input.password),
+      phone: data.phone,
+      status: data.active ? ("active" as const) : ("disabled" as const),
+      username: data.username,
+    };
+
+    let account: Awaited<ReturnType<typeof db.account.create>>;
+    if (idempotencyKey) {
+      const requestHash = createHash("sha256")
+        .update(JSON.stringify(data))
+        .digest("hex");
+      const expiresAt = new Date(
+        Date.now() + this.settings.accountCreateIdempotencyTtlSeconds * 1000
+      );
+      const create = () =>
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotency transaction must remain atomic.
+        db.$transaction(async (transaction) => {
+          const existing =
+            await transaction.accountCreateIdempotency.findUnique({
+              include: { account: true },
+              where: { key: idempotencyKey },
+            });
+          if (existing && existing.expiresAt > new Date()) {
+            if (existing.requestHash !== requestHash) {
+              throw serviceError(
+                "IDEMPOTENCY_CONFLICT",
+                "idempotencyKey was used with a different request",
+                "invalid_argument"
+              );
+            }
+            if (existing.account && !existing.account.deletedAt) {
+              return existing.account;
+            }
             throw serviceError(
-              "IDEMPOTENCY_CONFLICT",
-              "idempotencyKey was used with a different request",
+              "IDEMPOTENCY_IN_PROGRESS",
+              "idempotencyKey request is still being processed",
               "invalid_argument"
             );
           }
-          if (existing.account && !existing.account.deletedAt) {
-            return existing.account;
+          if (existing) {
+            await transaction.accountCreateIdempotency.delete({
+              where: { key: idempotencyKey },
+            });
           }
-          throw serviceError(
-            "IDEMPOTENCY_IN_PROGRESS",
-            "idempotencyKey request is still being processed",
-            "invalid_argument"
-          );
-        }
-        if (existing) {
-          await transaction.accountCreateIdempotency.delete({
+          await transaction.accountCreateIdempotency.create({
+            data: { expiresAt, key: idempotencyKey, requestHash },
+          });
+          const created = await transaction.account.create({
+            data: accountData,
+          });
+          await transaction.accountCreateIdempotency.update({
+            data: { accountId: created.id },
             where: { key: idempotencyKey },
           });
+          return created;
+        });
+      try {
+        account = await create();
+      } catch (error) {
+        if (!isPrismaCode(error, "P2002")) {
+          throw error;
         }
-        await transaction.accountCreateIdempotency.create({
-          data: { expiresAt, key: idempotencyKey, requestHash },
-        });
-        const created = await transaction.account.create({
-          data: {
-            email: data.email,
-            passwordAlgorithm: "legacy-md5",
-            passwordChangedAt: new Date(),
-            passwordHash: passwordHash(input.password),
-            phone: data.phone,
-            status: data.active ? "active" : "disabled",
-            username: data.username,
-          },
-        });
-        await transaction.accountCreateIdempotency.update({
-          data: { accountId: created.id },
+        const existing = await db.accountCreateIdempotency.findUnique({
+          include: { account: true },
           where: { key: idempotencyKey },
         });
-        return created;
-      });
-    let account: Awaited<ReturnType<typeof create>>;
-    try {
-      account = await create();
-    } catch (error) {
-      if (!isPrismaCode(error, "P2002")) {
-        throw error;
+        if (
+          existing?.requestHash === requestHash &&
+          existing.expiresAt > new Date() &&
+          existing.account &&
+          !existing.account.deletedAt
+        ) {
+          account = existing.account;
+        } else {
+          throw serviceError(
+            "ACCOUNT_IDENTIFIER_CONFLICT",
+            "username, email, or phone is already in use",
+            "conflict"
+          );
+        }
       }
-      const existing = await db.accountCreateIdempotency.findUnique({
-        include: { account: true },
-        where: { key: idempotencyKey },
-      });
-      if (
-        existing?.requestHash === requestHash &&
-        existing.expiresAt > new Date() &&
-        existing.account &&
-        !existing.account.deletedAt
-      ) {
-        account = existing.account;
-      } else {
-        throw serviceError(
-          "ACCOUNT_IDENTIFIER_CONFLICT",
-          "username, email, or phone is already in use",
-          "conflict"
-        );
+    } else {
+      try {
+        account = await db.account.create({ data: accountData });
+      } catch (error) {
+        if (isPrismaCode(error, "P2002")) {
+          throw serviceError(
+            "ACCOUNT_IDENTIFIER_CONFLICT",
+            "username, email, or phone is already in use",
+            "conflict"
+          );
+        }
+        throw error;
       }
     }
     await this.audit({

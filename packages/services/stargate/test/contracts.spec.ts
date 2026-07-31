@@ -36,10 +36,20 @@ const environment = {
 describe("stargate service contracts", () => {
   it("loads config without relying on module initialization", () => {
     expect(loadStargateConfig(environment)).toMatchObject({
+      accountCreateIdempotencyTtlSeconds: 3600,
       apiKey: "api-key",
       captchaAttempts: 5,
       redisKeyPrefix: "stargate-next:",
     });
+  });
+
+  it("allows overriding account create idempotency ttl", () => {
+    expect(
+      loadStargateConfig({
+        ...environment,
+        ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS: "7200",
+      }).accountCreateIdempotencyTtlSeconds
+    ).toBe(7200);
   });
 
   it("rejects an incomplete secondary refresh key", () => {

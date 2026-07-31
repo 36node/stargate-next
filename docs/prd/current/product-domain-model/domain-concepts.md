@@ -175,7 +175,8 @@ Account 创建命令可携带 `IdempotencyKey`：
 - 在有效期内，同一个 key 与相同请求应返回同一个 Account 结果。
 - 同一个 key 与不同请求构成幂等冲突。
 - 尚未完成的同 key 请求应报告处理中，不能并行创建多个 Account。
-- 当前有效期为 24 小时。
+- 未提供 key 时直接创建 Account，不记录幂等状态。
+- 有效期由 `ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS` 配置，默认 3600 秒（1 小时）。
 - 幂等记录是命令执行的支持模型，不属于 Account 的长期业务状态。
 
 ## 4. 实体

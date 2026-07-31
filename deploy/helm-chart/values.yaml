@@ -24,6 +24,7 @@ stargateNext:
     redisKeyPrefix: "stargate-next:"
     accessTokenTtlSeconds: "3600"
     refreshTokenTtlSeconds: "604800"
+    accountCreateIdempotencyTtlSeconds: "3600"
     captchaTtlSeconds: "300"
     captchaMaxAttempts: "5"
     captchaCreateLimit: "30"

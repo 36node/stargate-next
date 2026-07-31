@@ -300,7 +300,7 @@
       },
       "CreateAccountInput": {
         "type": "object",
-        "required": ["username", "password", "idempotencyKey"],
+        "required": ["username", "password"],
         "properties": {
           "username": { "type": "string" },
           "phone": { "type": ["string", "null"] },

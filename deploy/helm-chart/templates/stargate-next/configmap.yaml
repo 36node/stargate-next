@@ -13,6 +13,7 @@ data:
   REDIS_KEY_PREFIX: {{ .Values.stargateNext.config.redisKeyPrefix | quote }}
   ACCESS_TOKEN_TTL_SECONDS: {{ .Values.stargateNext.config.accessTokenTtlSeconds | quote }}
   REFRESH_TTL_SECONDS: {{ .Values.stargateNext.config.refreshTokenTtlSeconds | quote }}
+  ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS: {{ .Values.stargateNext.config.accountCreateIdempotencyTtlSeconds | quote }}
   CAPTCHA_TTL_SECONDS: {{ .Values.stargateNext.config.captchaTtlSeconds | quote }}
   CAPTCHA_MAX_ATTEMPTS: {{ .Values.stargateNext.config.captchaMaxAttempts | quote }}
   CAPTCHA_CREATE_LIMIT: {{ .Values.stargateNext.config.captchaCreateLimit | quote }}

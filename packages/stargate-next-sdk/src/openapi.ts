@@ -228,7 +228,7 @@ export interface components {
             email?: string | null;
             password: string;
             active?: boolean;
-            idempotencyKey: string;
+            idempotencyKey?: string;
         };
         PatchAccountInput: {
             username?: string;
