@@ -30,6 +30,17 @@ import type {
 
 type ResolvedKey = { key: JoseCryptoKey | Uint8Array; algorithms: string[] };
 
+export function isCookieSecure(
+  configuredSecure: boolean | undefined,
+  forwardedProto: string | null
+): boolean | undefined {
+  if (!configuredSecure) {
+    return configuredSecure;
+  }
+  const protocol = forwardedProto?.split(",", 1)[0]?.trim().toLowerCase();
+  return protocol === "http" ? false : configuredSecure;
+}
+
 async function resolveVerifyKey(config: JwtVerifyConfig): Promise<ResolvedKey> {
   switch (config.algorithm) {
     case "HS256":
@@ -73,6 +84,13 @@ export function NextStargate({
 }: StargateConfig) {
   const verifyKeyPromise = resolveVerifyKey(jwt);
 
+  async function resolveCookieSecure(): Promise<boolean | undefined> {
+    return isCookieSecure(
+      cookieSecure,
+      (await headers()).get("x-forwarded-proto")
+    );
+  }
+
   async function verifyToken(token: string): Promise<TokenPayload> {
     const { key, algorithms } = await verifyKeyPromise;
     const res = await jwtVerify(token, key, { algorithms });
@@ -88,7 +106,7 @@ export function NextStargate({
     });
     await setSessionCookies(
       res.data,
-      cookieSecure,
+      await resolveCookieSecure(),
       Boolean(state?.rememberMe),
       cookieNames
     );
@@ -218,13 +236,14 @@ export function NextStargate({
     });
 
     if (response) {
+      const secure = await resolveCookieSecure();
       response.cookies.set(cookieNames.token, res.data.token, {
-        secure: cookieSecure,
+        secure,
         expires: res.data.tokenExpireAt,
         ...CookieOptions,
       });
       response.cookies.set(cookieNames.refresh, res.data.key, {
-        secure: cookieSecure,
+        secure,
         expires: res.data.expireAt,
         ...CookieOptions,
       });
@@ -299,7 +318,12 @@ export function NextStargate({
       return NextResponse.redirect(loginUrl);
     }
 
-    await setSessionCookies(session, cookieSecure, undefined, cookieNames);
+    await setSessionCookies(
+      session,
+      await resolveCookieSecure(),
+      undefined,
+      cookieNames
+    );
 
     let redirectTo: URL;
     if (session.source && pages.bindRedirect) {

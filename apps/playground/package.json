@@ -10,6 +10,7 @@
     "start": "node .next/standalone/apps/playground/server.js",
     "storybook": "storybook dev -p 6006 --config-dir packages/ui/.storybook",
     "storybook:build": "storybook build --config-dir packages/ui/.storybook",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
