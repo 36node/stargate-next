@@ -5,6 +5,7 @@ import type { components, paths } from "./openapi";
 export type Account = components["schemas"]["Account"];
 export type AuthTokens = components["schemas"]["AuthTokens"];
 export type CreateAccountInput = components["schemas"]["CreateAccountInput"];
+export type ErrorCode = components["schemas"]["ErrorCode"];
 export type PatchAccountInput = components["schemas"]["PatchAccountInput"];
 export type AccountCollection = components["schemas"]["AccountCollection"];
 export type Captcha =

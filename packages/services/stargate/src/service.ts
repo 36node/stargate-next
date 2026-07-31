@@ -5,7 +5,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-import { checkDbHealth, db } from "@repo/db";
+import { type Account, checkDbHealth, db, type Prisma } from "@repo/db";
 import {
   checkRedisHealth,
   getRedisClient,
@@ -43,12 +43,50 @@ const PHONE_PATTERN = /^\+?\d+$/;
 const PASSWORD_HASH_PATTERN = /^[a-zA-Z0-9]{13}[a-f0-9]{32}$/;
 const LETTER_PATTERN = /^[a-zA-Z]/;
 
+type IdempotencyFingerprint = {
+  active: boolean;
+  email: string | null;
+  passwordDigest: string;
+  phone: string | null;
+  username: string;
+  version: 2;
+};
+
+type IdempotencyRecord = Prisma.AccountCreateIdempotencyGetPayload<{
+  include: { account: true };
+}>;
+
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
     error.code === code
+  );
+}
+
+function resolveIdempotentAccount(
+  existing: IdempotencyRecord | null,
+  requestHash: string,
+  now: Date
+): Account | undefined {
+  if (!existing || existing.expiresAt <= now) {
+    return;
+  }
+  if (existing.requestHash !== requestHash) {
+    throw serviceError(
+      "IDEMPOTENCY_CONFLICT",
+      "idempotencyKey was used with a different request",
+      "invalid_argument"
+    );
+  }
+  if (existing.account && !existing.account.deletedAt) {
+    return existing.account;
+  }
+  throw serviceError(
+    "IDEMPOTENCY_IN_PROGRESS",
+    "idempotencyKey request is still being processed",
+    "invalid_argument"
   );
 }
 
@@ -202,6 +240,30 @@ export class StargateService implements StargateServiceContract {
 
   private redisKey(prefix: string, suffix: string): string {
     return `${this.settings.redisKeyPrefix}${prefix}${suffix}`;
+  }
+
+  private idempotencyFingerprint(
+    data: {
+      active: boolean;
+      email: string | null;
+      phone: string | null;
+      username: string;
+    },
+    password: string
+  ): string {
+    const fingerprint: IdempotencyFingerprint = {
+      active: data.active,
+      email: data.email,
+      passwordDigest: createHmac("sha256", this.settings.jwtSecret)
+        .update(password)
+        .digest("hex"),
+      phone: data.phone,
+      username: data.username,
+      version: 2,
+    };
+    return createHash("sha256")
+      .update(JSON.stringify(fingerprint))
+      .digest("hex");
   }
 
   private createCaptchaImage(fixedCode?: string): {
@@ -453,36 +515,24 @@ export class StargateService implements StargateServiceContract {
 
     let account: Awaited<ReturnType<typeof db.account.create>>;
     if (idempotencyKey) {
-      const requestHash = createHash("sha256")
-        .update(JSON.stringify(data))
-        .digest("hex");
+      const requestHash = this.idempotencyFingerprint(data, input.password);
       const expiresAt = new Date(
         Date.now() + this.settings.accountCreateIdempotencyTtlSeconds * 1000
       );
       const create = () =>
-        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotency transaction must remain atomic.
         db.$transaction(async (transaction) => {
           const existing =
             await transaction.accountCreateIdempotency.findUnique({
               include: { account: true },
               where: { key: idempotencyKey },
             });
-          if (existing && existing.expiresAt > new Date()) {
-            if (existing.requestHash !== requestHash) {
-              throw serviceError(
-                "IDEMPOTENCY_CONFLICT",
-                "idempotencyKey was used with a different request",
-                "invalid_argument"
-              );
-            }
-            if (existing.account && !existing.account.deletedAt) {
-              return existing.account;
-            }
-            throw serviceError(
-              "IDEMPOTENCY_IN_PROGRESS",
-              "idempotencyKey request is still being processed",
-              "invalid_argument"
-            );
+          const resolved = resolveIdempotentAccount(
+            existing,
+            requestHash,
+            new Date()
+          );
+          if (resolved) {
+            return resolved;
           }
           if (existing) {
             await transaction.accountCreateIdempotency.delete({
@@ -511,20 +561,19 @@ export class StargateService implements StargateServiceContract {
           include: { account: true },
           where: { key: idempotencyKey },
         });
-        if (
-          existing?.requestHash === requestHash &&
-          existing.expiresAt > new Date() &&
-          existing.account &&
-          !existing.account.deletedAt
-        ) {
-          account = existing.account;
-        } else {
+        const resolved = resolveIdempotentAccount(
+          existing,
+          requestHash,
+          new Date()
+        );
+        if (!resolved) {
           throw serviceError(
             "ACCOUNT_IDENTIFIER_CONFLICT",
             "username, email, or phone is already in use",
             "conflict"
           );
         }
+        account = resolved;
       }
     } else {
       try {
@@ -607,30 +656,43 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext
   ): Promise<PublicAccount> {
     await this.getAccount(id);
+    const data = {
+      ...(input.email !== undefined
+        ? {
+            email: input.email === null ? null : normalizeEmail(input.email),
+          }
+        : {}),
+      ...(input.phone !== undefined
+        ? {
+            phone: input.phone === null ? null : normalizePhone(input.phone),
+          }
+        : {}),
+      ...(input.username !== undefined
+        ? { username: normalizeUsername(input.username) }
+        : {}),
+      ...(input.active !== undefined
+        ? { status: input.active ? "active" : "disabled" }
+        : {}),
+    };
     try {
-      const account = await db.account.update({
-        data: {
-          ...(input.email !== undefined
-            ? {
-                email:
-                  input.email === null ? null : normalizeEmail(input.email),
-              }
-            : {}),
-          ...(input.phone !== undefined
-            ? {
-                phone:
-                  input.phone === null ? null : normalizePhone(input.phone),
-              }
-            : {}),
-          ...(input.username !== undefined
-            ? { username: normalizeUsername(input.username) }
-            : {}),
-          ...(input.active !== undefined
-            ? { status: input.active ? "active" : "disabled" }
-            : {}),
-        },
-        where: { id },
-      });
+      const account =
+        input.active === false
+          ? (
+              await db.$transaction([
+                db.session.deleteMany({ where: { accountId: id } }),
+                db.account.update({ data, where: { id } }),
+              ])
+            )[1]
+          : await db.account.update({ data, where: { id } });
+      if (input.active === false) {
+        await this.audit({
+          accountId: id,
+          context,
+          eventType: "session.revoke",
+          metadata: { reason: "account_disable" },
+          success: true,
+        });
+      }
       await this.audit({
         accountId: id,
         context,
@@ -678,19 +740,23 @@ export class StargateService implements StargateServiceContract {
 
   async deleteAccount(id: string, context: RequestContext): Promise<void> {
     const account = await db.account.findUnique({ where: { id } });
-    if (account && !account.deletedAt) {
-      await db.$transaction([
-        db.session.deleteMany({ where: { accountId: id } }),
-        db.account.update({
-          data: {
-            deletedAt: new Date(),
-            email: null,
-            phone: null,
-            username: `deleted-${account.id}`,
-          },
-          where: { id },
-        }),
-      ]);
+    if (!account || account.deletedAt) {
+      return;
+    }
+    const [, deleted] = await db.$transaction([
+      db.session.deleteMany({ where: { accountId: id } }),
+      db.account.updateMany({
+        data: {
+          deletedAt: new Date(),
+          email: null,
+          phone: null,
+          username: `deleted:${account.id}`,
+        },
+        where: { deletedAt: null, id },
+      }),
+    ]);
+    if (deleted.count === 0) {
+      return;
     }
     await this.audit({
       accountId: id,

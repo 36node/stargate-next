@@ -89,6 +89,7 @@
         ],
         "responses": {
           "200": { "$ref": "#/components/responses/AccountCollection" },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" }
         }
       },
@@ -98,7 +99,9 @@
         "requestBody": { "$ref": "#/components/requestBodies/CreateAccount" },
         "responses": {
           "201": { "$ref": "#/components/responses/Account" },
-          "401": { "$ref": "#/components/responses/Error" }
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -116,6 +119,7 @@
         "security": [{ "serviceApiKey": [] }],
         "responses": {
           "200": { "$ref": "#/components/responses/Account" },
+          "401": { "$ref": "#/components/responses/Error" },
           "404": { "$ref": "#/components/responses/Error" }
         }
       },
@@ -123,12 +127,21 @@
         "operationId": "patchAccount",
         "security": [{ "serviceApiKey": [] }],
         "requestBody": { "$ref": "#/components/requestBodies/PatchAccount" },
-        "responses": { "200": { "$ref": "#/components/responses/Account" } }
+        "responses": {
+          "200": { "$ref": "#/components/responses/Account" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
       },
       "delete": {
         "operationId": "deleteAccount",
         "security": [{ "serviceApiKey": [] }],
-        "responses": { "204": { "description": "account deleted" } }
+        "responses": {
+          "204": { "description": "account deleted" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
       }
     },
     "/v1/accounts/@batchGet": {
@@ -149,7 +162,9 @@
                 }
               }
             }
-          }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -166,7 +181,12 @@
         "operationId": "changePassword",
         "security": [{ "serviceApiKey": [] }],
         "requestBody": { "$ref": "#/components/requestBodies/ChangePassword" },
-        "responses": { "204": { "description": "password changed" } }
+        "responses": {
+          "204": { "description": "password changed" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
       }
     },
     "/v1/accounts/{accountId}/sessions": {
@@ -265,6 +285,29 @@
       }
     },
     "schemas": {
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "ACCESS_TOKEN_INVALID",
+          "ACCOUNT_IDENTIFIER_CONFLICT",
+          "ACCOUNT_NOT_FOUND",
+          "API_KEY_INVALID",
+          "BATCH_INVALID",
+          "CAPTCHA_INVALID",
+          "CAPTCHA_RATE_LIMITED",
+          "EMAIL_INVALID",
+          "IDEMPOTENCY_CONFLICT",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "LOGIN_INVALID",
+          "LOGIN_LOCKED",
+          "PAGE_INVALID",
+          "PASSWORD_INVALID",
+          "PATCH_INVALID",
+          "PHONE_INVALID",
+          "REFRESH_INVALID",
+          "USERNAME_INVALID"
+        ]
+      },
       "LoginInput": {
         "type": "object",
         "required": ["login", "password", "captchaId", "captchaCode"],
@@ -323,7 +366,12 @@
         "type": "object",
         "required": ["accountIds"],
         "properties": {
-          "accountIds": { "type": "array", "items": { "type": "string" } }
+          "accountIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": { "type": "string" }
+          }
         }
       },
       "ChangePasswordInput": {
@@ -367,7 +415,15 @@
       },
       "Account": {
         "type": "object",
-        "required": ["id", "username", "active", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "username",
+          "phone",
+          "email",
+          "active",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": { "type": "string" },
           "username": { "type": "string" },
@@ -404,9 +460,11 @@
           },
           "meta": {
             "type": "object",
+            "required": ["page"],
             "properties": {
               "page": {
                 "type": "object",
+                "required": ["offset", "limit", "total"],
                 "properties": {
                   "offset": { "type": "integer" },
                   "limit": { "type": "integer" },
@@ -485,10 +543,17 @@
         "content": { "application/json": { "schema": { "type": "object" } } }
       },
       "Error": {
-        "description": "Stable error response: { statusCode, code, message }",
+        "description": "Stable error response: { code, message }",
         "content": {
           "application/json": {
-            "schema": { "type": "object", "required": ["code", "message"] }
+            "schema": {
+              "type": "object",
+              "required": ["code", "message"],
+              "properties": {
+                "code": { "$ref": "#/components/schemas/ErrorCode" },
+                "message": { "type": "string" }
+              }
+            }
           }
         }
       },

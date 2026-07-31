@@ -12,5 +12,12 @@
     "passwordAlgorithm": "legacy-md5",
     "passwordHash": "busAdminSalt1cfbebdfa42914cb8cc099ab9858251c7",
     "username": "bus-admin"
+  },
+  {
+    "id": "legacy-unknown-algo",
+    "password": "unsupported-password",
+    "passwordAlgorithm": "argon2id",
+    "passwordHash": "$argon2id$v=19$m=65536,t=3,p=1$unsupported",
+    "username": "legacy-unknown-algo"
   }
 ]

@@ -13,10 +13,12 @@ export type AccountInput = {
   idempotencyKey?: string;
 };
 
-export type AccountPatchInput = Omit<
-  AccountInput,
-  "password" | "idempotencyKey"
->;
+export type AccountPatchInput = {
+  active?: boolean;
+  email?: string | null;
+  phone?: string | null;
+  username?: string;
+};
 
 export type LoginInput = {
   captchaCode: string;
@@ -76,6 +78,7 @@ export type StargateErrorCode =
   | "ACCOUNT_IDENTIFIER_CONFLICT"
   | "ACCOUNT_NOT_FOUND"
   | "API_KEY_INVALID"
+  | "BATCH_INVALID"
   | "CAPTCHA_INVALID"
   | "CAPTCHA_RATE_LIMITED"
   | "EMAIL_INVALID"
@@ -83,7 +86,9 @@ export type StargateErrorCode =
   | "IDEMPOTENCY_IN_PROGRESS"
   | "LOGIN_INVALID"
   | "LOGIN_LOCKED"
+  | "PAGE_INVALID"
   | "PASSWORD_INVALID"
+  | "PATCH_INVALID"
   | "PHONE_INVALID"
   | "REFRESH_INVALID"
   | "USERNAME_INVALID";

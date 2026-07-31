@@ -1,46 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { env, request } from "./support/black-box";
+
 const CAPTCHA_CODE_PATTERN = /^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$/;
 const CAPTCHA_IMAGE_PATTERN = /^data:image\/svg\+xml;base64,/;
 
-function env(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`${name} is required for black-box tests`);
-  }
-  return value;
-}
-
-const baseUrl = env("STARGATE_ENDPOINT");
-const apiKey = env("STARGATE_API_KEY");
 const captchaTestCode = env("CAPTCHA_TEST_CODE").trim().toUpperCase();
-
-async function request(
-  path: string,
-  method: string,
-  options: {
-    accessToken?: string;
-    body?: unknown;
-    forwardedFor?: string;
-    service?: boolean;
-  } = {}
-) {
-  const { accessToken, body, forwardedFor, service = false } = options;
-  const response = await fetch(`${baseUrl}${path}`, {
-    body: body ? JSON.stringify(body) : undefined,
-    headers: {
-      ...(body ? { "content-type": "application/json" } : {}),
-      ...(service ? { "x-api-key": apiKey } : {}),
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
-      ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
-    },
-    method,
-  });
-  return {
-    body: response.status === 204 ? undefined : await response.json(),
-    status: response.status,
-  };
-}
 
 describe("Given a running Stargate Next service", () => {
   it.each([

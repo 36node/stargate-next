@@ -206,6 +206,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @enum {string} */
+        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "USERNAME_INVALID";
         LoginInput: {
             login: string;
             password: string;
@@ -268,9 +270,9 @@ export interface components {
         Account: {
             id: string;
             username: string;
-            phone?: string | null;
+            phone: string | null;
             /** Format: email */
-            email?: string | null;
+            email: string | null;
             active: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -289,10 +291,10 @@ export interface components {
                 next?: string;
             };
             meta: {
-                page?: {
-                    offset?: number;
-                    limit?: number;
-                    total?: number;
+                page: {
+                    offset: number;
+                    limit: number;
+                    total: number;
                 };
             };
         };
@@ -366,13 +368,16 @@ export interface components {
                 "application/json": Record<string, never>;
             };
         };
-        /** @description Stable error response: { statusCode, code, message } */
+        /** @description Stable error response: { code, message } */
         Error: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": Record<string, never>;
+                "application/json": {
+                    code: components["schemas"]["ErrorCode"];
+                    message: string;
+                };
             };
         };
         /** @description Dependency readiness failed */
@@ -545,6 +550,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["AccountCollection"];
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
         };
     };
@@ -558,7 +564,9 @@ export interface operations {
         requestBody: components["requestBodies"]["CreateAccount"];
         responses: {
             201: components["responses"]["Account"];
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getAccount: {
@@ -573,6 +581,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Account"];
+            401: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };
@@ -594,6 +603,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Error"];
         };
     };
     patchAccount: {
@@ -608,6 +618,10 @@ export interface operations {
         requestBody: components["requestBodies"]["PatchAccount"];
         responses: {
             200: components["responses"]["Account"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     batchGetAccounts: {
@@ -628,6 +642,8 @@ export interface operations {
                     "application/json": components["schemas"]["Account"][];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
     changePassword: {
@@ -648,6 +664,9 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listSessions: {
