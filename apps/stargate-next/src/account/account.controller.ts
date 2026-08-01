@@ -16,11 +16,20 @@ import {
 import type {
   AccountInput,
   AccountPatchInput,
+  StargateErrorCode,
   StargateServiceContract,
 } from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
 import { STARGATE_SERVICE } from "../auth/stargate-service.module";
+
+const BATCH_MAX_IDS = 100;
+const BATCH_MIN_IDS = 1;
+const PAGE_LIMIT_DEFAULT = 10;
+const PAGE_LIMIT_MAX = 100;
+const PATCH_FORBIDDEN_FIELDS = ["password", "idempotencyKey"] as const;
+
+type ApiErrorBody = { code: StargateErrorCode; message: string };
 
 function context(request: Request) {
   const forwardedFor = request.headers["x-forwarded-for"];
@@ -65,24 +74,25 @@ export class AccountController {
   ) {
     this.service.assertApiKey(apiKey);
     const offset = Number(offsetValue ?? "0");
-    const limit = Number(limitValue ?? "10");
+    const limit = Number(limitValue ?? String(PAGE_LIMIT_DEFAULT));
     if (
       !Number.isInteger(offset) ||
       offset < 0 ||
       !Number.isInteger(limit) ||
       limit < 1 ||
-      limit > 100
+      limit > PAGE_LIMIT_MAX
     ) {
       throw new BadRequestException({
         code: "PAGE_INVALID",
         message:
           "page[offset] must be non-negative and page[limit] must be 1..100",
-      });
+      } satisfies ApiErrorBody);
     }
     return this.service.listAccounts(limit, offset, "/v1/accounts");
   }
 
   @Post("@batchGet")
+  @HttpCode(200)
   batchGet(
     @Body() body: { accountIds?: unknown },
     @Headers("x-api-key") apiKey?: string
@@ -90,13 +100,14 @@ export class AccountController {
     this.service.assertApiKey(apiKey);
     if (
       !Array.isArray(body?.accountIds) ||
-      body.accountIds.length > 100 ||
+      body.accountIds.length < BATCH_MIN_IDS ||
+      body.accountIds.length > BATCH_MAX_IDS ||
       body.accountIds.some((id) => typeof id !== "string" || !id)
     ) {
       throw new BadRequestException({
         code: "BATCH_INVALID",
-        message: "accountIds must be an array of at most 100 non-empty strings",
-      });
+        message: "accountIds must be an array of 1 to 100 non-empty strings",
+      } satisfies ApiErrorBody);
     }
     return this.service.batchGet(body.accountIds);
   }
@@ -113,10 +124,22 @@ export class AccountController {
   @Patch(":accountId")
   patch(
     @Param("accountId") accountId: string,
-    @Body() body: AccountPatchInput,
+    @Body() body: AccountPatchInput | undefined,
     @Req() request: Request
   ) {
     this.service.assertApiKey(request.header("x-api-key"));
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new BadRequestException({
+        code: "PATCH_INVALID",
+        message: "patch body must be a JSON object",
+      } satisfies ApiErrorBody);
+    }
+    if (PATCH_FORBIDDEN_FIELDS.some((field) => Object.hasOwn(body, field))) {
+      throw new BadRequestException({
+        code: "PATCH_INVALID",
+        message: "patch body must not contain password or idempotencyKey",
+      } satisfies ApiErrorBody);
+    }
     return this.service.patchAccount(accountId, body, context(request));
   }
 
@@ -134,13 +157,13 @@ export class AccountController {
     @Body() body: { password?: unknown },
     @Req() request: Request
   ) {
+    this.service.assertApiKey(request.header("x-api-key"));
     if (typeof body?.password !== "string" || !body.password.trim()) {
       throw new BadRequestException({
         code: "PASSWORD_INVALID",
         message: "password is required",
-      });
+      } satisfies ApiErrorBody);
     }
-    this.service.assertApiKey(request.header("x-api-key"));
     await this.service.changePassword(
       accountId,
       body.password,

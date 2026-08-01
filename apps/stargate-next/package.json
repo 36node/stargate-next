@@ -12,8 +12,8 @@
     "seed:legacy-fixture": "pnpm --filter @repo/stargate-service seed:legacy-fixture",
     "start": "node dist/src/main.js",
     "test": "vitest run --passWithNoTests --exclude 'test/**/*.black-box.spec.ts'",
-    "test:api": "vitest run test/api.black-box.spec.ts",
-    "test:sdk": "vitest run test/sdk.black-box.spec.ts",
+    "test:api": "vitest run api.black-box.spec.ts",
+    "test:sdk": "vitest run sdk.black-box.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
