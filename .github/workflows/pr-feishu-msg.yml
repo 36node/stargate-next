@@ -82,7 +82,7 @@ jobs:
 
       - name: Save Feishu thread ID to PR comment
         if: steps.pr-comments.outputs.found != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           FEISHU_MESSAGE_ID: ${{ steps.create-thread.outputs.message_id }}
         with:

@@ -689,7 +689,7 @@ jobs:
 
       - name: Comment PR deploy URLs
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           API_URL: ${{ steps.deploy-context.outputs.api_url }}
           PLAYGROUND_URL: ${{ steps.deploy-context.outputs.playground_url }}
