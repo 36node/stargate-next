@@ -13,6 +13,7 @@ import {
 } from "@repo/redis";
 import svgCaptcha from "svg-captcha";
 
+import { signAccessToken, verifyAuthorizationHeader } from "./access-token";
 import { loadStargateConfig, type StargateConfig } from "./config";
 import type {
   AccessTokenClaims,
@@ -26,6 +27,7 @@ import type {
   PublicAccount,
   RequestContext,
   Session,
+  StargateErrorCode,
   StargateHealth,
   StargateServiceContract,
 } from "./contracts";
@@ -42,6 +44,16 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^\+?\d+$/;
 const PASSWORD_HASH_PATTERN = /^[a-zA-Z0-9]{13}[a-f0-9]{32}$/;
 const LETTER_PATTERN = /^[a-zA-Z]/;
+const LOGIN_FAILURE_SCRIPT = `local count = redis.call("INCR", KEYS[1])
+if count == 1 or count >= tonumber(ARGV[1]) then
+  redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+end
+return count`;
+const CAPTCHA_RATE_LIMIT_SCRIPT = `local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], tonumber(ARGV[1]))
+end
+return count`;
 
 type IdempotencyFingerprint = {
   active: boolean;
@@ -90,13 +102,13 @@ function resolveIdempotentAccount(
   );
 }
 
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.length) {
-    throw serviceError(
-      `${field.toUpperCase()}_INVALID` as "PASSWORD_INVALID",
-      `${field} is required`,
-      "invalid_argument"
-    );
+function requiredString(
+  value: unknown,
+  code: StargateErrorCode,
+  message: string
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw serviceError(code, message, "invalid_argument");
   }
   return value;
 }
@@ -291,30 +303,6 @@ export class StargateService implements StargateServiceContract {
     };
   }
 
-  private accessToken(
-    accountId: string,
-    sessionId: string
-  ): {
-    expiresAt: Date;
-    token: string;
-  } {
-    const now = Math.floor(Date.now() / 1000);
-    const payload = {
-      exp: now + this.settings.tokenTtlSeconds,
-      iat: now,
-      sid: sessionId,
-      sub: accountId,
-      type: "access",
-    };
-    const base64Url = (value: string | Buffer) =>
-      Buffer.from(value).toString("base64url");
-    const encoded = `${base64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${base64Url(JSON.stringify(payload))}`;
-    return {
-      expiresAt: new Date(payload.exp * 1000),
-      token: `${encoded}.${base64Url(createHmac("sha256", this.settings.jwtSecret).update(encoded).digest())}`,
-    };
-  }
-
   private async audit({
     accountId,
     context,
@@ -363,79 +351,25 @@ export class StargateService implements StargateServiceContract {
   }
 
   accessTokenClaims(authorization: string | undefined): AccessTokenClaims {
-    if (!authorization?.startsWith("Bearer ")) {
-      throw serviceError(
-        "ACCESS_TOKEN_INVALID",
-        "bearer access token is required",
-        "unauthenticated"
-      );
-    }
-    const [header, payload, signature, ...extra] = authorization
-      .slice(7)
-      .split(".");
-    if (!(header && payload && signature) || extra.length) {
-      throw serviceError(
-        "ACCESS_TOKEN_INVALID",
-        "access token is malformed",
-        "unauthenticated"
-      );
-    }
-    const expected = createHmac("sha256", this.settings.jwtSecret)
-      .update(`${header}.${payload}`)
-      .digest();
-    const actual = Buffer.from(signature, "base64url");
-    if (
-      actual.length !== expected.length ||
-      !timingSafeEqual(actual, expected)
-    ) {
-      throw serviceError(
-        "ACCESS_TOKEN_INVALID",
-        "access token signature is invalid",
-        "unauthenticated"
-      );
-    }
-    try {
-      const claims = JSON.parse(
-        Buffer.from(payload, "base64url").toString("utf8")
-      ) as {
-        exp?: number;
-        sid?: string;
-        sub?: string;
-        type?: string;
-      };
-      if (
-        claims.type !== "access" ||
-        typeof claims.exp !== "number" ||
-        claims.exp <= Math.floor(Date.now() / 1000) ||
-        !claims.sid ||
-        !claims.sub
-      ) {
-        throw new Error("invalid claims");
-      }
-      return { accountId: claims.sub, sessionId: claims.sid };
-    } catch {
-      throw serviceError(
-        "ACCESS_TOKEN_INVALID",
-        "access token claims are invalid",
-        "unauthenticated"
-      );
-    }
+    return verifyAuthorizationHeader(authorization, {
+      clockToleranceSeconds: this.settings.clockToleranceSeconds,
+      secret: this.settings.jwtSecret,
+    });
   }
 
   async createCaptcha(context: RequestContext): Promise<Captcha> {
     const client = context.ip ?? "unknown";
     const rateLimitKey = this.redisKey(CAPTCHA_RATE_LIMIT_PREFIX, client);
-    const attempts = await withRedisTimeout(
-      getRedisClient().incr(rateLimitKey)
-    );
-    if (attempts === 1) {
+    const attempts = Number(
       await withRedisTimeout(
-        getRedisClient().expire(
+        getRedisClient().eval(
+          CAPTCHA_RATE_LIMIT_SCRIPT,
+          1,
           rateLimitKey,
-          this.settings.captchaCreateWindowSeconds
+          String(this.settings.captchaCreateWindowSeconds)
         )
-      );
-    }
+      )
+    );
     if (attempts > this.settings.captchaCreateLimit) {
       throw serviceError(
         "CAPTCHA_RATE_LIMITED",
@@ -471,8 +405,8 @@ export class StargateService implements StargateServiceContract {
          captcha.attempts = captcha.attempts + 1
          if captcha.attempts >= tonumber(ARGV[2]) then redis.call("DEL", KEYS[1])
          else
-           local ttl = redis.call("TTL", KEYS[1])
-           if ttl > 0 then redis.call("SET", KEYS[1], cjson.encode(captcha), "EX", ttl) end
+           local ttl = redis.call("PTTL", KEYS[1])
+           if ttl > 0 then redis.call("PSETEX", KEYS[1], ttl, cjson.encode(captcha)) end
          end
          return -1`,
         1,
@@ -490,7 +424,7 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext
   ): Promise<PublicAccount> {
     const idempotencyKey = input.idempotencyKey?.trim() || undefined;
-    requiredString(input.password, "password");
+    requiredString(input.password, "PASSWORD_INVALID", "password is required");
     const data = {
       active: input.active !== false,
       email:
@@ -718,7 +652,7 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext
   ): Promise<void> {
     await this.getAccount(id);
-    requiredString(password, "password");
+    requiredString(password, "PASSWORD_INVALID", "password is required");
     await db.$transaction([
       db.session.deleteMany({ where: { accountId: id } }),
       db.account.update({
@@ -768,9 +702,13 @@ export class StargateService implements StargateServiceContract {
   }
 
   async login(input: LoginInput, context: RequestContext): Promise<AuthTokens> {
-    const rawLogin = requiredString(input.login, "login").trim();
-    const normalizedLogin = this.normalizeLogin(rawLogin);
-    requiredString(input.password, "password");
+    const rawLogin = requiredString(
+      input.login,
+      "LOGIN_IDENTIFIER_INVALID",
+      "login is required"
+    ).trim();
+    const normalizedLogin = this.normalizeLoginForLookup(rawLogin);
+    requiredString(input.password, "PASSWORD_INVALID", "password is required");
     const failureKey = this.redisKey(LOGIN_FAILURE_PREFIX, normalizedLogin);
     const failures = Number(
       (await withRedisTimeout(getRedisClient().get(failureKey))) ?? "0"
@@ -826,7 +764,12 @@ export class StargateService implements StargateServiceContract {
         refreshKeyHmacKeyId: this.settings.primary.id,
       },
     });
-    const token = this.accessToken(account.id, session.id);
+    const token = signAccessToken({
+      accountId: account.id,
+      secret: this.settings.jwtSecret,
+      sessionId: session.id,
+      ttlSeconds: this.settings.tokenTtlSeconds,
+    });
     await this.audit({
       accountId: account.id,
       context,
@@ -849,9 +792,14 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext,
     accountId?: string
   ): Promise<void> {
-    await withRedisTimeout(getRedisClient().incr(key));
     await withRedisTimeout(
-      getRedisClient().expire(key, this.settings.loginLockSeconds)
+      getRedisClient().eval(
+        LOGIN_FAILURE_SCRIPT,
+        1,
+        key,
+        String(this.settings.loginAttempts),
+        String(this.settings.loginLockSeconds)
+      )
     );
     await this.audit({
       accountId,
@@ -869,6 +817,14 @@ export class StargateService implements StargateServiceContract {
       return normalizeUsername(rawLogin);
     }
     return normalizePhone(rawLogin);
+  }
+
+  private normalizeLoginForLookup(rawLogin: string): string {
+    try {
+      return this.normalizeLogin(rawLogin);
+    } catch {
+      return rawLogin.toLowerCase();
+    }
   }
 
   async refresh(
@@ -917,7 +873,12 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    const token = this.accessToken(account.id, session.id);
+    const token = signAccessToken({
+      accountId: account.id,
+      secret: this.settings.jwtSecret,
+      sessionId: session.id,
+      ttlSeconds: this.settings.tokenTtlSeconds,
+    });
     await this.audit({
       accountId: account.id,
       context,

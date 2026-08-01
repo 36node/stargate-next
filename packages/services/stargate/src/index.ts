@@ -1,4 +1,11 @@
 export {
+  ACCESS_TOKEN_INVALID_MESSAGE,
+  type SignedAccessToken,
+  signAccessToken,
+  verifyAccessToken,
+  verifyAuthorizationHeader,
+} from "./access-token";
+export {
   loadStargateConfig,
   type StargateConfig,
 } from "./config";

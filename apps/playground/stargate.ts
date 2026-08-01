@@ -2,6 +2,7 @@
 
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 
+import { resolveClockTolerance, sessionCookieNames } from "@/auth-config";
 import type {
   AuthService,
   JwtVerifyConfig,
@@ -17,14 +18,23 @@ const pages = {
 };
 
 function resolveJwt(): JwtVerifyConfig {
+  const clockToleranceSeconds = resolveClockTolerance(
+    env.STARGATE_AUTH_BACKEND,
+    env.JWT_CLOCK_TOLERANCE_SECONDS
+  );
   if (env.STARGATE_JWT_PUBLIC_KEY) {
     return {
       algorithm: "RS256",
+      clockToleranceSeconds,
       publicKey: env.STARGATE_JWT_PUBLIC_KEY.replace(/\\n/g, "\n"),
     };
   }
 
-  return { algorithm: "HS256", secret: env.STARGATE_JWT_SECRET };
+  return {
+    algorithm: "HS256",
+    clockToleranceSeconds,
+    secret: env.STARGATE_JWT_SECRET,
+  };
 }
 
 function nextSession(tokens: {
@@ -89,10 +99,7 @@ function resolveAuth(): AuthService {
 
 export const { ensureSession, loadSession, signIn, signOut } = NextStargate({
   auth: resolveAuth(),
-  cookieNames:
-    env.STARGATE_AUTH_BACKEND === "next"
-      ? { refresh: "s-next-refresh", token: "s-next-token" }
-      : undefined,
+  cookieNames: sessionCookieNames,
   cookieSecure: process.env.NODE_ENV === "production",
   jwt: resolveJwt(),
   pages,

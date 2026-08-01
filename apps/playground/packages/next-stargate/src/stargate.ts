@@ -17,6 +17,7 @@ import {
 } from "./cookie";
 import { findProviderByPathname, safeParseState } from "./helper";
 import type {
+  AuthRefreshResponse,
   AuthService,
   JwtVerifyConfig,
   Provider,
@@ -93,7 +94,10 @@ export function NextStargate({
 
   async function verifyToken(token: string): Promise<TokenPayload> {
     const { key, algorithms } = await verifyKeyPromise;
-    const res = await jwtVerify(token, key, { algorithms });
+    const res = await jwtVerify(token, key, {
+      algorithms,
+      clockTolerance: jwt.clockToleranceSeconds ?? 0,
+    });
     return res.payload as TokenPayload;
   }
 
@@ -107,7 +111,7 @@ export function NextStargate({
     await setSessionCookies(
       res.data,
       await resolveCookieSecure(),
-      Boolean(state?.rememberMe),
+      state?.rememberMe,
       cookieNames
     );
     const redirectUrl = state?.from ?? pages.loginRedirect;
@@ -189,16 +193,20 @@ export function NextStargate({
       return;
     }
 
-    const payload = await verifyToken(token);
-    return {
-      id: payload.sid,
-      subject: payload.sub,
-      source: payload.source,
-      ns: payload.ns,
-      permissions: payload.permissions,
-      type: payload.type,
-      roles: payload.roles,
-    };
+    try {
+      const payload = await verifyToken(token);
+      return {
+        id: payload.sid,
+        subject: payload.sub,
+        source: payload.source,
+        ns: payload.ns,
+        permissions: payload.permissions,
+        type: payload.type,
+        roles: payload.roles,
+      };
+    } catch {
+      return;
+    }
   }
 
   async function loadSession(
@@ -231,9 +239,18 @@ export function NextStargate({
       return;
     }
 
-    const res = await auth.refresh({
-      body: { refreshToken },
-    });
+    let res: AuthRefreshResponse;
+    try {
+      res = await auth.refresh({
+        body: { refreshToken },
+      });
+    } catch {
+      if (response) {
+        response.cookies.delete(cookieNames.token);
+        response.cookies.delete(cookieNames.refresh);
+      }
+      return;
+    }
 
     if (response) {
       const secure = await resolveCookieSecure();
@@ -253,17 +270,21 @@ export function NextStargate({
   }
 
   async function signOut() {
-    const session = await loadSession();
-    if (!session) {
-      return;
+    try {
+      const session = await loadSession();
+      if (session) {
+        await auth.logout({
+          body: {
+            sid: session.id,
+            token: await getSessionTokenFromCookie(cookieNames.token),
+          },
+        });
+      }
+    } catch {
+      // 远端注销是 best effort；本地凭据仍须清理。
+    } finally {
+      await clearSessionCookies(cookieNames);
     }
-    await auth.logout({
-      body: {
-        sid: session.id,
-        token: await getSessionTokenFromCookie(cookieNames.token),
-      },
-    });
-    await clearSessionCookies(cookieNames);
     redirect(pages.login);
   }
 

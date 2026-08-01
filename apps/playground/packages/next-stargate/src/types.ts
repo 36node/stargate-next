@@ -1,9 +1,10 @@
 import type { JWTPayload } from "jose";
 
-export type JwtVerifyConfig =
+export type JwtVerifyConfig = (
   | { algorithm: "HS256"; secret: string }
   | { algorithm: "RS256"; publicKey: string }
-  | { algorithm: "ES256"; publicKey: string };
+  | { algorithm: "ES256"; publicKey: string }
+) & { clockToleranceSeconds?: number };
 
 export type TokenPayload = JWTPayload & {
   sub: string;
@@ -56,6 +57,7 @@ export type SignInProvider = string;
 export type SignInParams = SignInCredential | SignInProvider;
 export type SignInState = {
   from?: string;
+  rememberMe?: boolean;
   [key: string]: unknown;
 };
 

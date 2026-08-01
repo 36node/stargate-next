@@ -152,6 +152,7 @@ jobs:
           pnpm --filter stargate-next test:sdk
         env:
           ACCESS_TOKEN_TTL_SECONDS: "3600"
+          JWT_CLOCK_TOLERANCE_SECONDS: "30"
           CAPTCHA_HMAC_SECRET: ci-captcha-hmac-secret
           CAPTCHA_TEST_CODE: ABCD
           CAPTCHA_TEST_MODE: "true"

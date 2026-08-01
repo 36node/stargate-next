@@ -13,18 +13,37 @@ export async function request(
   method: string,
   options: {
     accessToken?: string;
+    apiKey?: string;
+    authorization?: string;
     body?: unknown;
     forwardedFor?: string;
     service?: boolean;
   } = {}
 ) {
-  const { accessToken, body, forwardedFor, service = false } = options;
+  const {
+    accessToken,
+    apiKey,
+    authorization,
+    body,
+    forwardedFor,
+    service = false,
+  } = options;
+  const serviceApiKey =
+    apiKey === undefined && service ? env("STARGATE_API_KEY") : apiKey;
+  let authorizationHeader: string | undefined;
+  if (authorization !== undefined) {
+    authorizationHeader = authorization;
+  } else if (accessToken) {
+    authorizationHeader = `Bearer ${accessToken}`;
+  }
   const response = await fetch(`${env("STARGATE_ENDPOINT")}${path}`, {
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json" }),
-      ...(service ? { "x-api-key": env("STARGATE_API_KEY") } : {}),
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      ...(serviceApiKey === undefined ? {} : { "x-api-key": serviceApiKey }),
+      ...(authorizationHeader !== undefined
+        ? { authorization: authorizationHeader }
+        : {}),
       ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
     },
     method,
@@ -35,8 +54,12 @@ export async function request(
   };
 }
 
-export async function login(loginValue: string, password: string) {
-  const captcha = await request("/v1/captchas", "POST");
+export async function login(
+  loginValue: string,
+  password: string,
+  forwardedFor?: string
+) {
+  const captcha = await request("/v1/captchas", "POST", { forwardedFor });
   if (captcha.status !== 201) {
     throw new Error(`captcha creation failed with status ${captcha.status}`);
   }
@@ -47,6 +70,7 @@ export async function login(loginValue: string, password: string) {
       login: loginValue,
       password,
     },
+    forwardedFor,
   });
 }
 

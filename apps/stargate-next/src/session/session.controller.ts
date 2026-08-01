@@ -12,7 +12,10 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
-import type { StargateServiceContract } from "@repo/stargate-service/contracts";
+import type {
+  StargateErrorCode,
+  StargateServiceContract,
+} from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
 import { STARGATE_SERVICE } from "../auth/stargate-service.module";
@@ -35,11 +38,15 @@ function context(request: Request) {
   };
 }
 
-function requiredString(value: unknown, field: string): string {
+function requiredString(
+  value: unknown,
+  code: StargateErrorCode,
+  message: string
+): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new BadRequestException({
-      code: `${field.toUpperCase()}_INVALID`,
-      message: `${field} is required`,
+      code,
+      message,
     });
   }
   return value;
@@ -66,8 +73,16 @@ export class SessionController {
   async verifyCaptcha(@Body() body: { code?: unknown; id?: unknown }) {
     return {
       verified: await this.service.verifyCaptcha(
-        requiredString(body?.id, "captchaId"),
-        requiredString(body?.code, "captchaCode")
+        requiredString(
+          body?.id,
+          "CAPTCHA_ID_INVALID",
+          "captcha id is required"
+        ),
+        requiredString(
+          body?.code,
+          "CAPTCHA_CODE_INVALID",
+          "captcha code is required"
+        )
       ),
     };
   }
@@ -85,10 +100,26 @@ export class SessionController {
   ) {
     return this.service.login(
       {
-        captchaCode: requiredString(body?.captchaCode, "captchaCode"),
-        captchaId: requiredString(body?.captchaId, "captchaId"),
-        login: requiredString(body?.login, "login"),
-        password: requiredString(body?.password, "password"),
+        captchaCode: requiredString(
+          body?.captchaCode,
+          "CAPTCHA_CODE_INVALID",
+          "captcha code is required"
+        ),
+        captchaId: requiredString(
+          body?.captchaId,
+          "CAPTCHA_ID_INVALID",
+          "captcha id is required"
+        ),
+        login: requiredString(
+          body?.login,
+          "LOGIN_IDENTIFIER_INVALID",
+          "login is required"
+        ),
+        password: requiredString(
+          body?.password,
+          "PASSWORD_INVALID",
+          "password is required"
+        ),
       },
       context(request)
     );
@@ -98,7 +129,11 @@ export class SessionController {
   @HttpCode(200)
   refresh(@Body() body: { refreshKey?: unknown }, @Req() request: Request) {
     return this.service.refresh(
-      requiredString(body?.refreshKey, "refreshKey"),
+      requiredString(
+        body?.refreshKey,
+        "REFRESH_KEY_INVALID",
+        "refresh key is required"
+      ),
       context(request)
     );
   }

@@ -35,7 +35,8 @@
         "operationId": "verifyCaptcha",
         "requestBody": { "$ref": "#/components/requestBodies/VerifyCaptcha" },
         "responses": {
-          "200": { "$ref": "#/components/responses/CaptchaVerification" }
+          "200": { "$ref": "#/components/responses/CaptchaVerification" },
+          "400": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -45,6 +46,7 @@
         "requestBody": { "$ref": "#/components/requestBodies/Login" },
         "responses": {
           "200": { "$ref": "#/components/responses/AuthTokens" },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" }
         }
       }
@@ -52,9 +54,11 @@
     "/v1/auth/refresh": {
       "post": {
         "operationId": "refresh",
+        "description": "Returns fresh credentials. Clients must replace their stored refresh key with refreshKey from every successful response; the key may be rotated even when the current implementation returns the existing value.",
         "requestBody": { "$ref": "#/components/requestBodies/Refresh" },
         "responses": {
           "200": { "$ref": "#/components/responses/AuthTokens" },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" }
         }
       }
@@ -63,7 +67,10 @@
       "post": {
         "operationId": "logout",
         "security": [{ "bearerAccessToken": [] }],
-        "responses": { "204": { "description": "session removed" } }
+        "responses": {
+          "204": { "description": "session removed" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
       }
     },
     "/v1/accounts": {
@@ -201,7 +208,11 @@
       "get": {
         "operationId": "listSessions",
         "security": [{ "serviceApiKey": [] }],
-        "responses": { "200": { "$ref": "#/components/responses/Sessions" } }
+        "responses": {
+          "200": { "$ref": "#/components/responses/Sessions" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
       },
       "delete": {
         "operationId": "revokeSessions",
@@ -209,7 +220,10 @@
         "parameters": [
           { "in": "query", "name": "sessionId", "schema": { "type": "string" } }
         ],
-        "responses": { "204": { "description": "sessions removed" } }
+        "responses": {
+          "204": { "description": "sessions removed" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
       }
     }
   },
@@ -293,11 +307,14 @@
           "ACCOUNT_NOT_FOUND",
           "API_KEY_INVALID",
           "BATCH_INVALID",
+          "CAPTCHA_CODE_INVALID",
+          "CAPTCHA_ID_INVALID",
           "CAPTCHA_INVALID",
           "CAPTCHA_RATE_LIMITED",
           "EMAIL_INVALID",
           "IDEMPOTENCY_CONFLICT",
           "IDEMPOTENCY_IN_PROGRESS",
+          "LOGIN_IDENTIFIER_INVALID",
           "LOGIN_INVALID",
           "LOGIN_LOCKED",
           "PAGE_INVALID",
@@ -305,6 +322,7 @@
           "PATCH_INVALID",
           "PHONE_INVALID",
           "REFRESH_INVALID",
+          "REFRESH_KEY_INVALID",
           "USERNAME_INVALID"
         ]
       },
@@ -394,7 +412,11 @@
           "accessTokenExpiresAt": { "type": "string", "format": "date-time" },
           "accountId": { "type": "string" },
           "refreshExpiresAt": { "type": "string", "format": "date-time" },
-          "refreshKey": { "type": "string", "writeOnly": true },
+          "refreshKey": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Refresh key to persist for the next refresh. It may differ from the submitted key."
+          },
           "sessionId": { "type": "string" }
         }
       },
