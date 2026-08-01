@@ -143,10 +143,7 @@ export function verifyAccessToken(
   }
 
   const nowSeconds = Math.floor((options.now ?? Date.now()) / 1000);
-  if (
-    (payload.iat as number) > nowSeconds + options.clockToleranceSeconds ||
-    nowSeconds >= (payload.exp as number) + options.clockToleranceSeconds
-  ) {
+  if (nowSeconds >= (payload.exp as number) + options.clockToleranceSeconds) {
     invalidAccessToken();
   }
   return {

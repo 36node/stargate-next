@@ -270,17 +270,21 @@ export function NextStargate({
   }
 
   async function signOut() {
-    const session = await loadSession();
-    if (!session) {
-      return;
+    try {
+      const session = await loadSession();
+      if (session) {
+        await auth.logout({
+          body: {
+            sid: session.id,
+            token: await getSessionTokenFromCookie(cookieNames.token),
+          },
+        });
+      }
+    } catch {
+      // 远端注销是 best effort；本地凭据仍须清理。
+    } finally {
+      await clearSessionCookies(cookieNames);
     }
-    await auth.logout({
-      body: {
-        sid: session.id,
-        token: await getSessionTokenFromCookie(cookieNames.token),
-      },
-    });
-    await clearSessionCookies(cookieNames);
     redirect(pages.login);
   }
 

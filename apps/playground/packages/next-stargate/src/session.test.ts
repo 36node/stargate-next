@@ -229,6 +229,20 @@ describe("NextStargate session state machine", () => {
     expect(cookieStore.delete).toHaveBeenCalledWith("s-next-refresh");
   });
 
+  it("clears cookies and redirects when remote logout fails", async () => {
+    const auth = authService({
+      logout: vi.fn().mockRejectedValue(new Error("logout unavailable")),
+    });
+    cookieValues.set("s-next-token", await token(60));
+    cookieValues.set("s-next-refresh", "refresh-old");
+
+    await expect(stargate(auth).signOut()).rejects.toThrow("REDIRECT:/sign-in");
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(cookieStore.delete).toHaveBeenCalledWith("s-next-token");
+    expect(cookieStore.delete).toHaveBeenCalledWith("s-next-refresh");
+    expect(cookieValues.size).toBe(0);
+  });
+
   it("does not project authorization claims into the next session", async () => {
     cookieValues.set("s-next-token", await token(60));
     const loaded = await stargate(authService()).loadSession();

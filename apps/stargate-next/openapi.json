@@ -54,6 +54,7 @@
     "/v1/auth/refresh": {
       "post": {
         "operationId": "refresh",
+        "description": "Returns fresh credentials. Clients must replace their stored refresh key with refreshKey from every successful response; the key may be rotated even when the current implementation returns the existing value.",
         "requestBody": { "$ref": "#/components/requestBodies/Refresh" },
         "responses": {
           "200": { "$ref": "#/components/responses/AuthTokens" },
@@ -411,7 +412,11 @@
           "accessTokenExpiresAt": { "type": "string", "format": "date-time" },
           "accountId": { "type": "string" },
           "refreshExpiresAt": { "type": "string", "format": "date-time" },
-          "refreshKey": { "type": "string", "writeOnly": true },
+          "refreshKey": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Refresh key to persist for the next refresh. It may differ from the submitted key."
+          },
           "sessionId": { "type": "string" }
         }
       },

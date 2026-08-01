@@ -252,7 +252,7 @@ describe("access token", () => {
     }
   });
 
-  it("enforces exact future and expiry tolerance boundaries", () => {
+  it("treats iat as metadata and enforces exact expiry tolerance boundaries", () => {
     const verify = (
       payload: Record<string, unknown>,
       clockToleranceSeconds: number
@@ -263,13 +263,15 @@ describe("access token", () => {
         secret: SECRET,
       });
 
-    expect(verify(validPayload({ iat: NOW_SECONDS + 30 }), 30)).toEqual({
-      accountId: "account-1",
-      sessionId: "session-1",
-    });
-    expect(() => verify(validPayload({ iat: NOW_SECONDS + 31 }), 30)).toThrow(
-      ACCESS_TOKEN_INVALID_MESSAGE
-    );
+    expect(
+      verify(
+        validPayload({
+          exp: NOW_SECONDS + 7200,
+          iat: NOW_SECONDS + 3600,
+        }),
+        30
+      )
+    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
     expect(
       verify(
         validPayload({ exp: NOW_SECONDS - 29, iat: NOW_SECONDS - 100 }),
@@ -283,13 +285,9 @@ describe("access token", () => {
       )
     ).toThrow(ACCESS_TOKEN_INVALID_MESSAGE);
 
-    expect(verify(validPayload({ iat: NOW_SECONDS }), 0)).toEqual({
-      accountId: "account-1",
-      sessionId: "session-1",
-    });
-    expect(() => verify(validPayload({ iat: NOW_SECONDS + 1 }), 0)).toThrow(
-      ACCESS_TOKEN_INVALID_MESSAGE
-    );
+    expect(
+      verify(validPayload({ exp: NOW_SECONDS + 2, iat: NOW_SECONDS + 1 }), 0)
+    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
     expect(
       verify(validPayload({ exp: NOW_SECONDS + 1, iat: NOW_SECONDS - 100 }), 0)
     ).toEqual({ accountId: "account-1", sessionId: "session-1" });

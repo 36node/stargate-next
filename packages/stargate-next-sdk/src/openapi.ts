@@ -93,6 +93,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Returns fresh credentials. Clients must replace their stored refresh key with refreshKey from every successful response; the key may be rotated even when the current implementation returns the existing value. */
         post: operations["refresh"];
         delete?: never;
         options?: never;
@@ -252,6 +253,7 @@ export interface components {
             accountId: string;
             /** Format: date-time */
             refreshExpiresAt: string;
+            /** @description Refresh key to persist for the next refresh. It may differ from the submitted key. */
             refreshKey: string;
             sessionId: string;
         };
