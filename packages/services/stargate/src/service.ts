@@ -405,8 +405,8 @@ export class StargateService implements StargateServiceContract {
          captcha.attempts = captcha.attempts + 1
          if captcha.attempts >= tonumber(ARGV[2]) then redis.call("DEL", KEYS[1])
          else
-           local ttl = redis.call("TTL", KEYS[1])
-           if ttl > 0 then redis.call("SET", KEYS[1], cjson.encode(captcha), "EX", ttl) end
+           local ttl = redis.call("PTTL", KEYS[1])
+           if ttl > 0 then redis.call("PSETEX", KEYS[1], ttl, cjson.encode(captcha)) end
          end
          return -1`,
         1,
