@@ -22,6 +22,7 @@ const config: StargateConfig = {
   captchaCreateWindowSeconds: 60,
   captchaHmacSecret: "itest-captcha-secret",
   captchaTtlSeconds: 300,
+  clockToleranceSeconds: 30,
   jwtSecret: "itest-jwt-secret",
   loginAttempts: 5,
   loginLockSeconds: 60,

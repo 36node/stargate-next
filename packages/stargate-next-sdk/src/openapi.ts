@@ -207,7 +207,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {string} */
-        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "USERNAME_INVALID";
+        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "USERNAME_INVALID";
         LoginInput: {
             login: string;
             password: string;
@@ -491,6 +491,7 @@ export interface operations {
         requestBody: components["requestBodies"]["VerifyCaptcha"];
         responses: {
             200: components["responses"]["CaptchaVerification"];
+            400: components["responses"]["Error"];
         };
     };
     login: {
@@ -503,6 +504,7 @@ export interface operations {
         requestBody: components["requestBodies"]["Login"];
         responses: {
             200: components["responses"]["AuthTokens"];
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
         };
     };
@@ -516,6 +518,7 @@ export interface operations {
         requestBody: components["requestBodies"]["Refresh"];
         responses: {
             200: components["responses"]["AuthTokens"];
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
         };
     };
@@ -535,6 +538,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Error"];
         };
     };
     listAccounts: {
@@ -681,6 +685,8 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Sessions"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     revokeSessions: {
@@ -703,6 +709,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Error"];
         };
     };
 }

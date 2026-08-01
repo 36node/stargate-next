@@ -29,7 +29,7 @@
     "cleanup:idempotency": "DOTENV_CONFIG_PATH=../../../.env node -r dotenv/config -r ts-node/register scripts/cleanup-idempotency.ts",
     "seed:legacy-fixture": "pnpm --filter @repo/db build && DOTENV_CONFIG_PATH=../../../.env TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' node -r dotenv/config -r ts-node/register scripts/seed-legacy-fixture.ts",
     "test": "vitest run --exclude 'test/**/*.integration.spec.ts'",
-    "test:integration": "pnpm --filter @repo/db build && pnpm --filter @repo/redis build && vitest run test/account.integration.spec.ts",
+    "test:integration": "pnpm --filter @repo/db build && pnpm --filter @repo/redis build && vitest run test/account.integration.spec.ts test/auth.integration.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

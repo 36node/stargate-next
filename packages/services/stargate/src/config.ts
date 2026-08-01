@@ -1,4 +1,5 @@
 const CAPTCHA_TEST_CODE_PATTERN = /^[A-Z0-9]{4}$/;
+const NON_NEGATIVE_DECIMAL = /^(0|[1-9][0-9]*)$/;
 
 export type StargateConfig = {
   accountCreateIdempotencyTtlSeconds: number;
@@ -9,6 +10,7 @@ export type StargateConfig = {
   captchaHmacSecret: string;
   captchaTestCode?: string;
   captchaTtlSeconds: number;
+  clockToleranceSeconds: number;
   jwtSecret: string;
   loginAttempts: number;
   loginLockSeconds: number;
@@ -40,6 +42,23 @@ function positiveInteger(
   return value;
 }
 
+function nonNegativeInteger(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+  fallback: string
+): number {
+  const raw = environment[name];
+  const candidate = raw === undefined ? fallback : raw;
+  if (!NON_NEGATIVE_DECIMAL.test(candidate)) {
+    throw new Error(`${name} must be a decimal non-negative integer`);
+  }
+  const value = Number(candidate);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${name} must be a safe integer`);
+  }
+  return value;
+}
+
 function optionalPair(
   environment: NodeJS.ProcessEnv,
   firstName: string,
@@ -55,6 +74,20 @@ function optionalPair(
   return id && secret ? { id, secret } : undefined;
 }
 
+function assertDistinctSecrets(secrets: [string, string][]): void {
+  for (let first = 0; first < secrets.length; first += 1) {
+    for (let second = first + 1; second < secrets.length; second += 1) {
+      const [firstName, firstValue] = secrets[first] as [string, string];
+      const [secondName, secondValue] = secrets[second] as [string, string];
+      if (firstValue === secondValue) {
+        throw new Error(
+          `${firstName} and ${secondName} must not share the same value`
+        );
+      }
+    }
+  }
+}
+
 export function loadStargateConfig(
   environment: NodeJS.ProcessEnv = process.env
 ): StargateConfig {
@@ -67,11 +100,8 @@ export function loadStargateConfig(
     "REFRESH_KEY_HMAC_SECONDARY_KEY_ID",
     "REFRESH_KEY_HMAC_SECONDARY_SECRET"
   );
-  if (
-    (secondary && secondary.id === primary.id) ||
-    (secondary && secondary.secret === primary.secret)
-  ) {
-    throw new Error("refresh HMAC key ids and secrets must be distinct");
+  if (secondary && secondary.id === primary.id) {
+    throw new Error("refresh HMAC key ids must be distinct");
   }
   const testCaptcha = environment.CAPTCHA_TEST_MODE === "true";
   if (testCaptcha && environment.NODE_ENV === "production") {
@@ -85,6 +115,32 @@ export function loadStargateConfig(
       "CAPTCHA_TEST_CODE must contain exactly 4 ASCII letters or digits"
     );
   }
+  const captchaHmacSecret = required(environment, "CAPTCHA_HMAC_SECRET");
+  const jwtSecret = required(environment, "STARGATE_JWT_SECRET");
+  const tokenTtlSeconds = positiveInteger(
+    environment,
+    "ACCESS_TOKEN_TTL_SECONDS",
+    "3600"
+  );
+  const clockToleranceSeconds = nonNegativeInteger(
+    environment,
+    "JWT_CLOCK_TOLERANCE_SECONDS",
+    "30"
+  );
+  if (clockToleranceSeconds * 2 > tokenTtlSeconds) {
+    throw new Error(
+      "JWT_CLOCK_TOLERANCE_SECONDS must not exceed half of ACCESS_TOKEN_TTL_SECONDS"
+    );
+  }
+  const secrets: [string, string][] = [
+    ["CAPTCHA_HMAC_SECRET", captchaHmacSecret],
+    ["STARGATE_JWT_SECRET", jwtSecret],
+    ["REFRESH_KEY_HMAC_PRIMARY_SECRET", primary.secret],
+  ];
+  if (secondary) {
+    secrets.push(["REFRESH_KEY_HMAC_SECONDARY_SECRET", secondary.secret]);
+  }
+  assertDistinctSecrets(secrets);
   return {
     accountCreateIdempotencyTtlSeconds: positiveInteger(
       environment,
@@ -103,14 +159,15 @@ export function loadStargateConfig(
       "CAPTCHA_CREATE_WINDOW_SECONDS",
       "60"
     ),
-    captchaHmacSecret: required(environment, "CAPTCHA_HMAC_SECRET"),
+    captchaHmacSecret,
     captchaTestCode,
     captchaTtlSeconds: positiveInteger(
       environment,
       "CAPTCHA_TTL_SECONDS",
       "300"
     ),
-    jwtSecret: required(environment, "STARGATE_JWT_SECRET"),
+    clockToleranceSeconds,
+    jwtSecret,
     loginAttempts: positiveInteger(environment, "LOGIN_MAX_ATTEMPTS", "5"),
     loginLockSeconds: positiveInteger(environment, "LOGIN_LOCK_SECONDS", "60"),
     primary,
@@ -122,10 +179,6 @@ export function loadStargateConfig(
     ),
     secondary,
     testCaptcha,
-    tokenTtlSeconds: positiveInteger(
-      environment,
-      "ACCESS_TOKEN_TTL_SECONDS",
-      "3600"
-    ),
+    tokenTtlSeconds,
   };
 }

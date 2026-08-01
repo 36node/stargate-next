@@ -33,6 +33,8 @@ type _PublicAccountMatchesApi = Assert<IsAssignable<PublicAccount, Account>>;
 type _TokensMatchApi = Assert<IsAssignable<ServiceAuthTokens, AuthTokens>>;
 type _CaptchaMatchesApi = Assert<IsAssignable<ServiceCaptcha, Captcha>>;
 type _SessionsMatchApi = Assert<IsAssignable<ServiceSession, Session>>;
+type _SessionKeys = Assert<SameKeys<ServiceSession, Session>>;
+type _SessionApiToService = Assert<IsAssignable<Session, ServiceSession>>;
 type _CollectionMatchesApi = Assert<
   IsAssignable<ServiceAccountCollection, AccountCollection>
 >;
