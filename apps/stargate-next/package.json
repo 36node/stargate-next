@@ -1,7 +1,7 @@
 {
   "name": "stargate-next",
   "version": "1.0.0",
-  "description": "Stargate Next API service",
+  "description": "Stargate Next API service (NestJS).",
   "private": true,
   "scripts": {
     "build": "pnpm --filter @repo/stargate-service... --if-present build && nest build",
