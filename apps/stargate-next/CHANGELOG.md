@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v1.0.0...stargate-next-v1.0.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **stargate-next:** republish image after release docker failure ([#40](https://github.com/36node-mekong/stargate-next/issues/40)) ([6dcfd71](https://github.com/36node-mekong/stargate-next/commit/6dcfd711e385255017097e4b0fdd02e06ed40225))
+
 ## [1.0.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v0.2.0...stargate-next-v1.0.0) (2026-08-03)
 
 
