@@ -80,7 +80,7 @@ jobs:
             local released="$4"
             local tag="$5"
             local output="$6"
-            [ "$released" = "true" ] || return
+            [ "$released" = "true" ] || return 0
             version="${tag#"${component}-v"}"
             test "$version" != "$tag"
             image="${HARBOR_DOMAIN}/${HARBOR_PROJECT}/${image_target}"
