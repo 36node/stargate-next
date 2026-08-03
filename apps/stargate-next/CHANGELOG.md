@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v0.2.0...stargate-next-v1.0.0) (2026-08-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **stargate-next:** advance stargate-next from the 0.x line to a stable 1.0 major version.
+
+### Features
+
+* **stargate-next:** prepare 1.0 major release ([#38](https://github.com/36node-mekong/stargate-next/issues/38)) ([dc06904](https://github.com/36node-mekong/stargate-next/commit/dc06904ff024d7d9da34aa487ff1260514d5474f))
+
 ## [0.2.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v0.1.0...stargate-next-v0.2.0) (2026-08-01)
 
 
