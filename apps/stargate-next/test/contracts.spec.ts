@@ -1,25 +1,40 @@
 import type {
-  AccountInput,
-  AccountPatchInput,
-  PublicAccount,
-  AccountCollection as ServiceAccountCollection,
-  AuthTokens as ServiceAuthTokens,
-  Captcha as ServiceCaptcha,
-  Session as ServiceSession,
-  StargateErrorCode,
-} from "@repo/stargate-service";
-import { describe, expect, it } from "vitest";
-
-import type {
   Account,
   AccountCollection,
   AuthTokens,
   Captcha,
   CreateAccountInput,
+  CreatedTenantApiKey,
+  CreateTenantInput,
   PatchAccountInput,
+  PatchTenantInput,
   ErrorCode as SdkErrorCode,
   Session,
-} from "../../../packages/stargate-next-sdk/src/generated";
+  Tenant,
+  TenantApiKey,
+  TenantApiKeyCollection,
+  TenantCollection,
+} from "@repo/stargate-next-sdk";
+import type {
+  AccountInput,
+  AccountPatchInput,
+  PublicAccount,
+  PublicTenant,
+  PublicTenantApiKey,
+  AccountCollection as ServiceAccountCollection,
+  AuthTokens as ServiceAuthTokens,
+  Captcha as ServiceCaptcha,
+  CreatedTenantApiKey as ServiceCreatedTenantApiKey,
+  Session as ServiceSession,
+  TenantApiKeyCollection as ServiceTenantApiKeyCollection,
+  TenantCollection as ServiceTenantCollection,
+  StargateErrorCode,
+  TenantApiKeyInput,
+  TenantApiKeyPatchInput,
+  TenantInput,
+  TenantPatchInput,
+} from "@repo/stargate-service";
+import { describe, expect, it } from "vitest";
 
 type Assert<T extends true> = T;
 type IsAssignable<From, To> = From extends To ? true : false;
@@ -65,6 +80,33 @@ type _CreateInputServiceToApi = Assert<
 >;
 type _CreateInputApiToService = Assert<
   IsAssignable<CreateAccountInput, AccountInput>
+>;
+type _TenantKeys = Assert<SameKeys<PublicTenant, Tenant>>;
+type _TenantServiceToApi = Assert<IsAssignable<PublicTenant, Tenant>>;
+type _TenantApiToService = Assert<IsAssignable<Tenant, PublicTenant>>;
+type _TenantInputKeys = Assert<SameKeys<TenantInput, CreateTenantInput>>;
+type _TenantPatchKeys = Assert<SameKeys<TenantPatchInput, PatchTenantInput>>;
+type _TenantCollectionKeys = Assert<
+  SameKeys<ServiceTenantCollection, TenantCollection>
+>;
+type _TenantCollectionServiceToApi = Assert<
+  IsAssignable<ServiceTenantCollection, TenantCollection>
+>;
+type _TenantCollectionApiToService = Assert<
+  IsAssignable<TenantCollection, ServiceTenantCollection>
+>;
+type _TenantApiKeyKeys = Assert<SameKeys<PublicTenantApiKey, TenantApiKey>>;
+type _CreatedTenantApiKeyKeys = Assert<
+  SameKeys<ServiceCreatedTenantApiKey, CreatedTenantApiKey>
+>;
+type _TenantApiKeyInputKeys = Assert<
+  SameKeys<TenantApiKeyInput, { name?: string | null }>
+>;
+type _TenantApiKeyPatchInputKeys = Assert<
+  SameKeys<TenantApiKeyPatchInput, { name: string | null }>
+>;
+type _TenantApiKeyCollectionKeys = Assert<
+  SameKeys<ServiceTenantApiKeyCollection, TenantApiKeyCollection>
 >;
 
 describe("service contracts", () => {

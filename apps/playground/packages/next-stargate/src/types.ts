@@ -9,6 +9,7 @@ export type JwtVerifyConfig = (
 export type TokenPayload = JWTPayload & {
   sub: string;
   sid: string;
+  tid?: string;
   source?: string;
   type?: string;
   ns?: string;
@@ -26,6 +27,7 @@ export type Session = {
   ns?: string;
   type?: string;
   id: string;
+  tenantId?: string;
   createdAt?: Date;
   updatedAt?: Date;
   createdBy?: string;
@@ -52,6 +54,7 @@ export type SignInCredential = {
   captchaId?: string;
   login: string;
   password: string;
+  tenantId?: string;
 };
 export type SignInProvider = string;
 export type SignInParams = SignInCredential | SignInProvider;
@@ -67,6 +70,7 @@ export type AuthLoginParams = {
     password: string;
     captchaId?: string;
     captchaCode?: string;
+    tenantId?: string;
   };
 };
 
@@ -108,6 +112,7 @@ export type AuthGetSessionByKeyResponse = {
 export type AuthRefreshParams = {
   body: {
     refreshToken: string;
+    tenantId?: string;
   };
 };
 
@@ -121,6 +126,7 @@ export type AuthLogoutParams = {
   body: {
     sid: string;
     token?: string;
+    tenantId?: string;
   };
 };
 

@@ -120,7 +120,10 @@ export interface paths {
     "/v1/accounts": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -136,7 +139,10 @@ export interface paths {
     "/v1/accounts/{accountId}": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -170,7 +176,10 @@ export interface paths {
     "/v1/accounts/{accountId}/password": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -188,7 +197,10 @@ export interface paths {
     "/v1/accounts/{accountId}/sessions": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -203,12 +215,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTenants"];
+        put?: never;
+        post: operations["createTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getTenant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["patchTenant"];
+        trace?: never;
+    };
+    "/v1/tenant-api-keys": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listTenantApiKeys"];
+        put?: never;
+        post: operations["createTenantApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenant-api-keys/{keyId}": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteTenantApiKey"];
+        options?: never;
+        head?: never;
+        patch: operations["patchTenantApiKey"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {string} */
-        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "USERNAME_INVALID";
+        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "BODY_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "TENANT_ALREADY_EXISTS" | "TENANT_API_KEY_NOT_FOUND" | "TENANT_API_KEY_SELF_DELETE" | "TENANT_DISABLED" | "TENANT_ID_INVALID" | "TENANT_INVALID" | "TENANT_NOT_FOUND" | "USERNAME_INVALID";
         LoginInput: {
             login: string;
             password: string;
@@ -256,6 +342,7 @@ export interface components {
             /** @description Refresh key to persist for the next refresh. It may differ from the submitted key. */
             refreshKey: string;
             sessionId: string;
+            tenantId: string;
         };
         CaptchaVerification: {
             verified: boolean;
@@ -278,6 +365,7 @@ export interface components {
             active: boolean;
             /** Format: date-time */
             createdAt: string;
+            tenantId: string;
             /** Format: date-time */
             updatedAt: string;
         };
@@ -287,6 +375,90 @@ export interface components {
                 type: "accounts";
                 id: string;
                 attributes: components["schemas"]["Account"];
+            }[];
+            links: {
+                self: string;
+                next?: string;
+            };
+            meta: {
+                page: {
+                    offset: number;
+                    limit: number;
+                    total: number;
+                };
+            };
+        };
+        Tenant: {
+            id: string;
+            name: string | null;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreateTenantInput: {
+            id?: string;
+            name?: string | null;
+        };
+        PatchTenantInput: {
+            name?: string | null;
+            /** @enum {string} */
+            status?: "active" | "disabled";
+        };
+        TenantCollection: {
+            data: {
+                /** @constant */
+                type: "tenants";
+                id: string;
+                attributes: components["schemas"]["Tenant"];
+            }[];
+            links: {
+                self: string;
+                next?: string;
+            };
+            meta: {
+                page: {
+                    offset: number;
+                    limit: number;
+                    total: number;
+                };
+            };
+        };
+        TenantApiKey: {
+            /** Format: date-time */
+            createdAt: string;
+            firstFour: string;
+            id: string;
+            name: string | null;
+            tenantId: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreatedTenantApiKey: {
+            /** Format: date-time */
+            createdAt: string;
+            firstFour: string;
+            id: string;
+            key: string;
+            name: string | null;
+            tenantId: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CreateTenantApiKeyInput: {
+            name?: string | null;
+        };
+        PatchTenantApiKeyInput: {
+            name: string | null;
+        };
+        TenantApiKeyCollection: {
+            data: {
+                /** @constant */
+                type: "tenant-api-keys";
+                id: string;
+                attributes: components["schemas"]["TenantApiKey"];
             }[];
             links: {
                 self: string;
@@ -361,6 +533,53 @@ export interface components {
                 "application/json": components["schemas"]["AccountCollection"];
             };
         };
+        /** @description Tenant */
+        Tenant: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Tenant"];
+            };
+        };
+        /** @description JSON:API tenant collection */
+        TenantCollection: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/vnd.api+json": components["schemas"]["TenantCollection"];
+                "application/json": components["schemas"]["TenantCollection"];
+            };
+        };
+        /** @description Tenant API key metadata */
+        TenantApiKey: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["TenantApiKey"];
+            };
+        };
+        /** @description Created Tenant API key with one-time plaintext */
+        CreatedTenantApiKey: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["CreatedTenantApiKey"];
+            };
+        };
+        /** @description JSON:API Tenant API key collection */
+        TenantApiKeyCollection: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/vnd.api+json": components["schemas"]["TenantApiKeyCollection"];
+                "application/json": components["schemas"]["TenantApiKeyCollection"];
+            };
+        };
         /** @description JSON response */
         Json: {
             headers: {
@@ -390,7 +609,10 @@ export interface components {
             content?: never;
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+        TenantHeader: string;
+    };
     requestBodies: {
         Login: {
             content: {
@@ -425,6 +647,26 @@ export interface components {
         ChangePassword: {
             content: {
                 "application/json": components["schemas"]["ChangePasswordInput"];
+            };
+        };
+        CreateTenant: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantInput"];
+            };
+        };
+        PatchTenant: {
+            content: {
+                "application/json": components["schemas"]["PatchTenantInput"];
+            };
+        };
+        CreateTenantApiKey: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantApiKeyInput"];
+            };
+        };
+        PatchTenantApiKey: {
+            content: {
+                "application/json": components["schemas"]["PatchTenantApiKeyInput"];
             };
         };
     };
@@ -473,7 +715,10 @@ export interface operations {
     createCaptcha: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -486,7 +731,10 @@ export interface operations {
     verifyCaptcha: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -499,7 +747,10 @@ export interface operations {
     login: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -513,7 +764,10 @@ export interface operations {
     refresh: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -527,7 +781,10 @@ export interface operations {
     logout: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -549,7 +806,10 @@ export interface operations {
                 "page[offset]"?: number;
                 "page[limit]"?: number;
             };
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -563,7 +823,10 @@ export interface operations {
     createAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -578,7 +841,10 @@ export interface operations {
     getAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -594,7 +860,10 @@ export interface operations {
     deleteAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -610,12 +879,16 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     patchAccount: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -633,7 +906,10 @@ export interface operations {
     batchGetAccounts: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -655,7 +931,10 @@ export interface operations {
     changePassword: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -678,7 +957,10 @@ export interface operations {
     listSessions: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -696,7 +978,10 @@ export interface operations {
             query?: {
                 sessionId?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
             path: {
                 accountId: string;
             };
@@ -712,6 +997,156 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listTenants: {
+        parameters: {
+            query?: {
+                "page[offset]"?: number;
+                "page[limit]"?: number;
+                "filter[name]"?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["TenantCollection"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    createTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["CreateTenant"];
+        responses: {
+            201: components["responses"]["Tenant"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["Tenant"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    patchTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["PatchTenant"];
+        responses: {
+            200: components["responses"]["Tenant"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listTenantApiKeys: {
+        parameters: {
+            query?: {
+                "page[offset]"?: number;
+                "page[limit]"?: number;
+            };
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["TenantApiKeyCollection"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    createTenantApiKey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: components["requestBodies"]["CreateTenantApiKey"];
+        responses: {
+            201: components["responses"]["CreatedTenantApiKey"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    deleteTenantApiKey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description tenant API key deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    patchTenantApiKey: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["PatchTenantApiKey"];
+        responses: {
+            200: components["responses"]["TenantApiKey"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

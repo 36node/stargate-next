@@ -5,7 +5,14 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-import { type Account, checkDbHealth, db, type Prisma } from "@repo/db";
+import {
+  type Account,
+  checkDbHealth,
+  db,
+  type Prisma,
+  type Tenant,
+  type TenantApiKey,
+} from "@repo/db";
 import {
   checkRedisHealth,
   getRedisClient,
@@ -20,19 +27,36 @@ import type {
   AccountCollection,
   AccountInput,
   AccountPatchInput,
+  ActorType,
+  AdminScope,
   AuthTokens,
   Captcha,
+  CreatedTenantApiKey,
   HealthCheck,
   LoginInput,
   PublicAccount,
+  PublicTenant,
+  PublicTenantApiKey,
   RequestContext,
   Session,
   StargateErrorCode,
   StargateHealth,
   StargateServiceContract,
+  TenantApiKeyCollection,
+  TenantApiKeyInput,
+  TenantApiKeyPatchInput,
+  TenantCollection,
+  TenantInput,
+  TenantPatchInput,
+  TenantScope,
+  TenantStatus,
 } from "./contracts";
 import { serviceError } from "./errors";
 
+const DEFAULT_TENANT_ID = "default";
+const TENANT_ID_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+const TENANT_ID_MAX_LENGTH = 63;
+const TENANT_API_KEY_PREFIX = "stk_";
 const CAPTCHA_PREFIX = "captcha:";
 const CAPTCHA_RATE_LIMIT_PREFIX = "captcha-rate-limit:";
 const LOGIN_FAILURE_PREFIX = "login-failure:";
@@ -55,7 +79,23 @@ if count == 1 then
 end
 return count`;
 
-type IdempotencyFingerprint = {
+type IdempotencyFingerprintV3 = {
+  active: boolean;
+  email: string | null;
+  passwordDigest: string;
+  phone: string | null;
+  tenantId: string;
+  username: string;
+  version: 3;
+};
+
+type CredentialScopeInput = {
+  actorId?: string;
+  actorType: ActorType;
+  tenantId: string;
+};
+
+type LegacyIdempotencyFingerprint = {
   active: boolean;
   email: string | null;
   passwordDigest: string;
@@ -68,37 +108,31 @@ type IdempotencyRecord = Prisma.AccountCreateIdempotencyGetPayload<{
   include: { account: true };
 }>;
 
+type IdempotencyResolution = {
+  account: Account;
+  upgradeLegacyHash: boolean;
+};
+
+type AuditInput = {
+  accountId?: string;
+  actorId?: string;
+  actorType: ActorType;
+  context: RequestContext;
+  eventType: string;
+  metadata?: Record<string, string>;
+  sessionId?: string;
+  success: boolean;
+  tenantId: string;
+};
+
+type DatabaseClient = Prisma.TransactionClient | typeof db;
+
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
     error.code === code
-  );
-}
-
-function resolveIdempotentAccount(
-  existing: IdempotencyRecord | null,
-  requestHash: string,
-  now: Date
-): Account | undefined {
-  if (!existing || existing.expiresAt <= now) {
-    return;
-  }
-  if (existing.requestHash !== requestHash) {
-    throw serviceError(
-      "IDEMPOTENCY_CONFLICT",
-      "idempotencyKey was used with a different request",
-      "invalid_argument"
-    );
-  }
-  if (existing.account && !existing.account.deletedAt) {
-    return existing.account;
-  }
-  throw serviceError(
-    "IDEMPOTENCY_IN_PROGRESS",
-    "idempotencyKey request is still being processed",
-    "invalid_argument"
   );
 }
 
@@ -199,13 +233,14 @@ function toIso(value: Date): string {
 }
 
 function publicAccount(account: {
-  id: string;
-  status: string;
-  username: string;
-  phone: string | null;
-  email: string | null;
   createdAt: Date;
+  email: string | null;
+  id: string;
+  phone: string | null;
+  status: string;
+  tenantId: string;
   updatedAt: Date;
+  username: string;
 }): PublicAccount {
   return {
     active: account.status === "active",
@@ -213,6 +248,7 @@ function publicAccount(account: {
     email: account.email,
     id: account.id,
     phone: account.phone,
+    tenantId: account.tenantId,
     updatedAt: toIso(account.updatedAt),
     username: account.username,
   };
@@ -229,6 +265,34 @@ function publicSession(session: {
     expiresAt: toIso(session.expiresAt),
     id: session.id,
     updatedAt: toIso(session.updatedAt),
+  };
+}
+
+function publicTenant(tenant: Tenant): PublicTenant {
+  return {
+    createdAt: toIso(tenant.createdAt),
+    id: tenant.id,
+    name: tenant.name,
+    status: tenant.status as TenantStatus,
+    updatedAt: toIso(tenant.updatedAt),
+  };
+}
+
+function publicTenantApiKey(key: {
+  createdAt: Date;
+  firstFour: string;
+  id: string;
+  name: string | null;
+  tenantId: string;
+  updatedAt: Date;
+}): PublicTenantApiKey {
+  return {
+    createdAt: toIso(key.createdAt),
+    firstFour: key.firstFour,
+    id: key.id,
+    name: key.name,
+    tenantId: key.tenantId,
+    updatedAt: toIso(key.updatedAt),
   };
 }
 
@@ -250,11 +314,228 @@ export class StargateService implements StargateServiceContract {
     this.settings = settings;
   }
 
-  private redisKey(prefix: string, suffix: string): string {
-    return `${this.settings.redisKeyPrefix}${prefix}${suffix}`;
+  private tenantScope(input: {
+    actorId?: string;
+    actorType: ActorType;
+    tenantId: string;
+  }): TenantScope {
+    return input as unknown as TenantScope;
+  }
+
+  private adminScope(): AdminScope {
+    return { actorType: "admin" } as unknown as AdminScope;
+  }
+
+  private constantTimeEquals(
+    supplied: string | undefined,
+    expected: string
+  ): boolean {
+    const suppliedDigest = createHash("sha256")
+      .update(supplied ?? "")
+      .digest();
+    const expectedDigest = createHash("sha256").update(expected).digest();
+    return timingSafeEqual(suppliedDigest, expectedDigest);
+  }
+
+  private parseTenantHeader(raw: string | undefined): string | undefined {
+    if (raw === undefined) {
+      return;
+    }
+    if (
+      raw.length < 1 ||
+      raw.length > TENANT_ID_MAX_LENGTH ||
+      !TENANT_ID_PATTERN.test(raw)
+    ) {
+      throw serviceError(
+        "TENANT_INVALID",
+        "tenant is invalid",
+        "unauthenticated"
+      );
+    }
+    return raw;
+  }
+
+  private assertTenantId(value: string): string {
+    if (
+      value === DEFAULT_TENANT_ID ||
+      value.length < 1 ||
+      value.length > TENANT_ID_MAX_LENGTH ||
+      !TENANT_ID_PATTERN.test(value)
+    ) {
+      throw serviceError(
+        "TENANT_ID_INVALID",
+        "tenant id is invalid",
+        "invalid_argument"
+      );
+    }
+    return value;
+  }
+
+  private assertTenantIdFormat(value: string): void {
+    if (
+      value.length < 1 ||
+      value.length > TENANT_ID_MAX_LENGTH ||
+      !TENANT_ID_PATTERN.test(value)
+    ) {
+      throw serviceError("TENANT_NOT_FOUND", "tenant not found", "not_found");
+    }
+  }
+
+  private async requireActiveTenant(id: string): Promise<Tenant> {
+    const tenant = await db.tenant.findUnique({ where: { id } });
+    if (!tenant) {
+      throw serviceError(
+        "TENANT_INVALID",
+        "tenant is invalid",
+        "unauthenticated"
+      );
+    }
+    if (tenant.status !== "active") {
+      throw serviceError(
+        "TENANT_DISABLED",
+        "tenant is disabled",
+        "unauthenticated"
+      );
+    }
+    return tenant;
+  }
+
+  private async findTenantApiKey(apiKey: string): Promise<TenantApiKey | null> {
+    const candidates = [
+      this.settings.tenantApiKeyPrimary,
+      this.settings.tenantApiKeySecondary,
+    ]
+      .filter((key): key is { id: string; secret: string } => key !== undefined)
+      .map((key) => ({
+        hash: hmac(key.secret, apiKey),
+        hmacKeyId: key.id,
+      }));
+
+    const record = await db.tenantApiKey.findFirst({
+      where: { OR: candidates },
+    });
+    if (!record) {
+      return null;
+    }
+
+    const candidate = candidates.find(
+      (value) => value.hmacKeyId === record.hmacKeyId
+    );
+    if (!candidate) {
+      return null;
+    }
+    const left = Buffer.from(record.hash, "hex");
+    const right = Buffer.from(candidate.hash, "hex");
+    if (
+      left.length !== 32 ||
+      right.length !== 32 ||
+      !timingSafeEqual(left, right)
+    ) {
+      return null;
+    }
+    return record;
+  }
+
+  private parseCredentialTenantHeader(
+    tenantHeader: string | undefined
+  ): string | undefined {
+    try {
+      return this.parseTenantHeader(tenantHeader);
+    } catch {
+      throw serviceError(
+        "TENANT_INVALID",
+        "tenant is invalid",
+        "unauthenticated"
+      );
+    }
+  }
+
+  private credentialScopeInput(
+    isAdmin: boolean,
+    isService: boolean,
+    tenantKey: TenantApiKey | null,
+    requested: string | undefined
+  ): CredentialScopeInput {
+    if (isAdmin) {
+      return {
+        actorType: "admin",
+        tenantId: requested ?? DEFAULT_TENANT_ID,
+      };
+    }
+    if (isService) {
+      if (requested && requested !== DEFAULT_TENANT_ID) {
+        throw serviceError(
+          "API_KEY_INVALID",
+          "invalid API key",
+          "unauthenticated"
+        );
+      }
+      return { actorType: "service", tenantId: DEFAULT_TENANT_ID };
+    }
+    if (!tenantKey || (requested && requested !== tenantKey.tenantId)) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid API key",
+        "unauthenticated"
+      );
+    }
+    return {
+      actorId: tenantKey.id,
+      actorType: "tenant_key",
+      tenantId: tenantKey.tenantId,
+    };
+  }
+
+  async resolveApiCredential(
+    apiKey: string | undefined,
+    tenantHeader: string | undefined
+  ): Promise<TenantScope> {
+    const isAdmin = this.constantTimeEquals(apiKey, this.settings.adminApiKey);
+    const isService = this.constantTimeEquals(apiKey, this.settings.apiKey);
+    const tenantKey =
+      isAdmin || isService ? null : await this.findTenantApiKey(apiKey ?? "");
+    if (!(isAdmin || isService || tenantKey)) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid API key",
+        "unauthenticated"
+      );
+    }
+    const requested = this.parseCredentialTenantHeader(tenantHeader);
+    const scopeInput = this.credentialScopeInput(
+      isAdmin,
+      isService,
+      tenantKey,
+      requested
+    );
+    await this.requireActiveTenant(scopeInput.tenantId);
+    return this.tenantScope(scopeInput);
+  }
+
+  resolveAdminCredential(apiKey: string | undefined): AdminScope {
+    if (!this.constantTimeEquals(apiKey, this.settings.adminApiKey)) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid admin API key",
+        "unauthenticated"
+      );
+    }
+    return this.adminScope();
+  }
+
+  accessTokenClaims(authorization: string | undefined): AccessTokenClaims {
+    return verifyAuthorizationHeader(authorization, {
+      clockToleranceSeconds: this.settings.clockToleranceSeconds,
+      secret: this.settings.jwtSecret,
+    });
+  }
+
+  private redisKey(prefix: string, tenantId: string, suffix: string): string {
+    return `${this.settings.redisKeyPrefix}${prefix}${encodeURIComponent(tenantId)}:${suffix}`;
   }
 
   private idempotencyFingerprint(
+    tenantId: string,
     data: {
       active: boolean;
       email: string | null;
@@ -263,7 +544,34 @@ export class StargateService implements StargateServiceContract {
     },
     password: string
   ): string {
-    const fingerprint: IdempotencyFingerprint = {
+    const fingerprint: IdempotencyFingerprintV3 = {
+      active: data.active,
+      email: data.email,
+      passwordDigest: createHmac("sha256", this.settings.jwtSecret)
+        .update(password)
+        .digest("hex"),
+      phone: data.phone,
+      tenantId,
+      username: data.username,
+      version: 3,
+    };
+    return createHash("sha256")
+      .update(JSON.stringify(fingerprint))
+      .digest("hex");
+  }
+
+  private legacyIdempotencyFingerprint(
+    data: {
+      active: boolean;
+      email: string | null;
+      phone: string | null;
+      username: string;
+    },
+    password: string
+  ): string {
+    // TODO(cleanup-ticket: Ticket #232 follow-up): 生产升级后的存量 v2 幂等记录全部超过
+    // ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS 后删除该兼容分支。
+    const fingerprint: LegacyIdempotencyFingerprint = {
       active: data.active,
       email: data.email,
       passwordDigest: createHmac("sha256", this.settings.jwtSecret)
@@ -276,6 +584,43 @@ export class StargateService implements StargateServiceContract {
     return createHash("sha256")
       .update(JSON.stringify(fingerprint))
       .digest("hex");
+  }
+
+  private resolveIdempotentAccount(
+    existing: IdempotencyRecord | null,
+    hashes: {
+      legacyHash?: string;
+      requestHash: string;
+      tenantId: string;
+    },
+    now: Date
+  ): IdempotencyResolution | undefined {
+    if (!existing || existing.expiresAt <= now) {
+      return;
+    }
+    const currentMatch = existing.requestHash === hashes.requestHash;
+    const legacyMatch =
+      hashes.tenantId === DEFAULT_TENANT_ID &&
+      hashes.legacyHash !== undefined &&
+      existing.requestHash === hashes.legacyHash;
+    if (!(currentMatch || legacyMatch)) {
+      throw serviceError(
+        "IDEMPOTENCY_CONFLICT",
+        "idempotencyKey was used with a different request",
+        "invalid_argument"
+      );
+    }
+    if (existing.account && !existing.account.deletedAt) {
+      return {
+        account: existing.account,
+        upgradeLegacyHash: legacyMatch,
+      };
+    }
+    throw serviceError(
+      "IDEMPOTENCY_IN_PROGRESS",
+      "idempotencyKey request is still being processed",
+      "invalid_argument"
+    );
   }
 
   private createCaptchaImage(fixedCode?: string): {
@@ -303,63 +648,62 @@ export class StargateService implements StargateServiceContract {
     };
   }
 
-  private async audit({
-    accountId,
-    context,
-    eventType,
-    metadata,
-    sessionId,
-    success,
-  }: {
-    accountId?: string;
-    context: RequestContext;
-    eventType: string;
-    metadata?: Record<string, string>;
-    sessionId?: string;
-    success: boolean;
-  }): Promise<void> {
-    await db.authAuditEvent.create({
+  private async writeAudit(
+    client: DatabaseClient,
+    input: AuditInput
+  ): Promise<void> {
+    await client.authAuditEvent.create({
       data: {
-        accountId,
-        actorId: accountId,
-        actorType: accountId ? "account" : "service",
-        eventType,
-        ip: context.ip,
-        metadata,
-        requestId: context.requestId,
-        sessionId,
-        success,
-        userAgent: context.userAgent,
+        accountId: input.accountId,
+        actorId: input.actorId,
+        actorType: input.actorType,
+        eventType: input.eventType,
+        ip: input.context.ip,
+        metadata: input.metadata,
+        requestId: input.context.requestId,
+        sessionId: input.sessionId,
+        success: input.success,
+        tenantId: input.tenantId,
+        userAgent: input.context.userAgent,
       },
     });
   }
 
-  assertApiKey(apiKey: string | undefined): void {
-    const supplied = apiKey ? Buffer.from(apiKey) : undefined;
-    const expected = Buffer.from(this.settings.apiKey);
-    if (
-      !supplied ||
-      supplied.length !== expected.length ||
-      !timingSafeEqual(supplied, expected)
-    ) {
-      throw serviceError(
-        "API_KEY_INVALID",
-        "invalid service API key",
-        "unauthenticated"
-      );
+  private audit(input: AuditInput): Promise<void> {
+    return this.writeAudit(db, input);
+  }
+
+  private async resolvePublicTenant(
+    raw: string | undefined,
+    failureCode: "LOGIN_INVALID" | "REFRESH_INVALID" | "TENANT_INVALID"
+  ): Promise<string> {
+    let tenantId: string;
+    try {
+      tenantId = this.parseTenantHeader(raw) ?? DEFAULT_TENANT_ID;
+    } catch {
+      throw serviceError(failureCode, "tenant is invalid", "unauthenticated");
     }
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || tenant.status !== "active") {
+      throw serviceError(failureCode, "tenant is invalid", "unauthenticated");
+    }
+    return tenantId;
   }
 
-  accessTokenClaims(authorization: string | undefined): AccessTokenClaims {
-    return verifyAuthorizationHeader(authorization, {
-      clockToleranceSeconds: this.settings.clockToleranceSeconds,
-      secret: this.settings.jwtSecret,
-    });
-  }
-
-  async createCaptcha(context: RequestContext): Promise<Captcha> {
+  async createCaptcha(
+    tenantHeader: string | undefined,
+    context: RequestContext
+  ): Promise<Captcha> {
+    const tenantId = await this.resolvePublicTenant(
+      tenantHeader,
+      "TENANT_INVALID"
+    );
     const client = context.ip ?? "unknown";
-    const rateLimitKey = this.redisKey(CAPTCHA_RATE_LIMIT_PREFIX, client);
+    const rateLimitKey = this.redisKey(
+      CAPTCHA_RATE_LIMIT_PREFIX,
+      tenantId,
+      client
+    );
     const attempts = Number(
       await withRedisTimeout(
         getRedisClient().eval(
@@ -383,7 +727,7 @@ export class StargateService implements StargateServiceContract {
     );
     await withRedisTimeout(
       getRedisClient().set(
-        this.redisKey(CAPTCHA_PREFIX, id),
+        this.redisKey(CAPTCHA_PREFIX, tenantId, id),
         JSON.stringify({
           attempts: 0,
           codeHash: hmac(this.settings.captchaHmacSecret, code),
@@ -395,7 +739,23 @@ export class StargateService implements StargateServiceContract {
     return { id, imageDataUri };
   }
 
-  async verifyCaptcha(id: string, code: string): Promise<boolean> {
+  async verifyCaptcha(
+    tenantHeader: string | undefined,
+    id: string,
+    code: string
+  ): Promise<boolean> {
+    const tenantId = await this.resolvePublicTenant(
+      tenantHeader,
+      "TENANT_INVALID"
+    );
+    return this.verifyCaptchaForTenant(tenantId, id, code);
+  }
+
+  private async verifyCaptchaForTenant(
+    tenantId: string,
+    id: string,
+    code: string
+  ): Promise<boolean> {
     const result = await withRedisTimeout(
       getRedisClient().eval(
         `local raw = redis.call("GET", KEYS[1])
@@ -410,7 +770,7 @@ export class StargateService implements StargateServiceContract {
          end
          return -1`,
         1,
-        this.redisKey(CAPTCHA_PREFIX, id),
+        this.redisKey(CAPTCHA_PREFIX, tenantId, id),
         hmac(this.settings.captchaHmacSecret, code.trim().toUpperCase()),
         String(this.settings.captchaAttempts)
       )
@@ -418,8 +778,9 @@ export class StargateService implements StargateServiceContract {
     return result === 1;
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bootstrap code not fine tuned for complexity.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 幂等创建包含存量兼容与竞争兜底。
   async createAccount(
+    scope: TenantScope,
     input: AccountInput,
     context: RequestContext
   ): Promise<PublicAccount> {
@@ -444,44 +805,69 @@ export class StargateService implements StargateServiceContract {
       passwordHash: passwordHash(input.password),
       phone: data.phone,
       status: data.active ? ("active" as const) : ("disabled" as const),
+      tenantId: scope.tenantId,
       username: data.username,
     };
 
     let account: Awaited<ReturnType<typeof db.account.create>>;
     if (idempotencyKey) {
-      const requestHash = this.idempotencyFingerprint(data, input.password);
+      const requestHash = this.idempotencyFingerprint(
+        scope.tenantId,
+        data,
+        input.password
+      );
+      const legacyHash =
+        scope.tenantId === DEFAULT_TENANT_ID
+          ? this.legacyIdempotencyFingerprint(data, input.password)
+          : undefined;
+      const hashes = { legacyHash, requestHash, tenantId: scope.tenantId };
       const expiresAt = new Date(
         Date.now() + this.settings.accountCreateIdempotencyTtlSeconds * 1000
       );
+      const compoundKey = {
+        key: idempotencyKey,
+        tenantId: scope.tenantId,
+      };
       const create = () =>
         db.$transaction(async (transaction) => {
           const existing =
             await transaction.accountCreateIdempotency.findUnique({
               include: { account: true },
-              where: { key: idempotencyKey },
+              where: { tenantId_key: compoundKey },
             });
-          const resolved = resolveIdempotentAccount(
+          const resolved = this.resolveIdempotentAccount(
             existing,
-            requestHash,
+            hashes,
             new Date()
           );
           if (resolved) {
-            return resolved;
+            if (resolved.upgradeLegacyHash) {
+              await transaction.accountCreateIdempotency.update({
+                data: { requestHash },
+                where: { tenantId_key: compoundKey },
+              });
+            }
+            return resolved.account;
           }
           if (existing) {
             await transaction.accountCreateIdempotency.delete({
-              where: { key: idempotencyKey },
+              where: { tenantId_key: compoundKey },
             });
           }
           await transaction.accountCreateIdempotency.create({
-            data: { expiresAt, key: idempotencyKey, requestHash },
+            data: {
+              expiresAt,
+              key: idempotencyKey,
+              requestHash,
+              tenantId: scope.tenantId,
+            },
           });
           const created = await transaction.account.create({
             data: accountData,
           });
           await transaction.accountCreateIdempotency.update({
             data: { accountId: created.id },
-            where: { key: idempotencyKey },
+            where: { tenantId_key: compoundKey },
           });
           return created;
         });
@@ -491,15 +877,25 @@ export class StargateService implements StargateServiceContract {
         if (!isPrismaCode(error, "P2002")) {
           throw error;
         }
-        const existing = await db.accountCreateIdempotency.findUnique({
-          include: { account: true },
-          where: { key: idempotencyKey },
+        const resolved = await db.$transaction(async (transaction) => {
+          const existing =
+            await transaction.accountCreateIdempotency.findUnique({
+              include: { account: true },
+              where: { tenantId_key: compoundKey },
+            });
+          const result = this.resolveIdempotentAccount(
+            existing,
+            hashes,
+            new Date()
+          );
+          if (result?.upgradeLegacyHash) {
+            await transaction.accountCreateIdempotency.update({
+              data: { requestHash },
+              where: { tenantId_key: compoundKey },
+            });
+          }
+          return result?.account;
         });
-        const resolved = resolveIdempotentAccount(
-          existing,
-          requestHash,
-          new Date()
-        );
         if (!resolved) {
           throw serviceError(
             "ACCOUNT_IDENTIFIER_CONFLICT",
@@ -525,24 +921,33 @@ export class StargateService implements StargateServiceContract {
     }
     await this.audit({
       accountId: account.id,
+      actorId: scope.actorId,
+      actorType: scope.actorType,
       context,
       eventType: "account.create",
       success: true,
+      tenantId: scope.tenantId,
     });
     return publicAccount(account);
   }
 
-  async getAccount(id: string): Promise<PublicAccount> {
-    const account = await db.account.findUnique({ where: { id } });
+  async getAccount(scope: TenantScope, id: string): Promise<PublicAccount> {
+    const account = await db.account.findFirst({
+      where: { id, tenantId: scope.tenantId },
+    });
     if (!account || account.deletedAt) {
       throw serviceError("ACCOUNT_NOT_FOUND", "account not found", "not_found");
     }
     return publicAccount(account);
   }
 
-  async batchGet(ids: string[]): Promise<PublicAccount[]> {
+  async batchGet(scope: TenantScope, ids: string[]): Promise<PublicAccount[]> {
     const accounts = await db.account.findMany({
-      where: { deletedAt: null, id: { in: ids } },
+      where: {
+        deletedAt: null,
+        id: { in: ids },
+        tenantId: scope.tenantId,
+      },
     });
     const byId = new Map(
       accounts.map((account) => [account.id, publicAccount(account)])
@@ -554,18 +959,20 @@ export class StargateService implements StargateServiceContract {
   }
 
   async listAccounts(
+    scope: TenantScope,
     limit: number,
     offset: number,
     basePath: string
   ): Promise<AccountCollection> {
+    const where = { deletedAt: null, tenantId: scope.tenantId };
     const [accounts, total] = await db.$transaction([
       db.account.findMany({
         orderBy: { createdAt: "desc" },
         skip: offset,
         take: limit,
-        where: { deletedAt: null },
+        where,
       }),
-      db.account.count({ where: { deletedAt: null } }),
+      db.account.count({ where }),
     ]);
     const nextOffset = offset + accounts.length;
     const query = (next: number) =>
@@ -585,21 +992,18 @@ export class StargateService implements StargateServiceContract {
   }
 
   async patchAccount(
+    scope: TenantScope,
     id: string,
     input: AccountPatchInput,
     context: RequestContext
   ): Promise<PublicAccount> {
-    await this.getAccount(id);
+    await this.getAccount(scope, id);
     const data = {
       ...(input.email !== undefined
-        ? {
-            email: input.email === null ? null : normalizeEmail(input.email),
-          }
+        ? { email: input.email === null ? null : normalizeEmail(input.email) }
         : {}),
       ...(input.phone !== undefined
-        ? {
-            phone: input.phone === null ? null : normalizePhone(input.phone),
-          }
+        ? { phone: input.phone === null ? null : normalizePhone(input.phone) }
         : {}),
       ...(input.username !== undefined
         ? { username: normalizeUsername(input.username) }
@@ -609,31 +1013,42 @@ export class StargateService implements StargateServiceContract {
         : {}),
     };
     try {
-      const account =
-        input.active === false
-          ? (
-              await db.$transaction([
-                db.session.deleteMany({ where: { accountId: id } }),
-                db.account.update({ data, where: { id } }),
-              ])
-            )[1]
-          : await db.account.update({ data, where: { id } });
       if (input.active === false) {
+        await db.$transaction([
+          db.session.deleteMany({
+            where: { accountId: id, tenantId: scope.tenantId },
+          }),
+          db.account.updateMany({
+            data,
+            where: { id, tenantId: scope.tenantId },
+          }),
+        ]);
         await this.audit({
           accountId: id,
+          actorId: scope.actorId,
+          actorType: scope.actorType,
           context,
           eventType: "session.revoke",
           metadata: { reason: "account_disable" },
           success: true,
+          tenantId: scope.tenantId,
+        });
+      } else {
+        await db.account.updateMany({
+          data,
+          where: { id, tenantId: scope.tenantId },
         });
       }
       await this.audit({
         accountId: id,
+        actorId: scope.actorId,
+        actorType: scope.actorType,
         context,
         eventType: "account.update",
         success: true,
+        tenantId: scope.tenantId,
       });
-      return publicAccount(account);
+      return this.getAccount(scope, id);
     } catch (error) {
       if (isPrismaCode(error, "P2002")) {
         throw serviceError(
@@ -647,38 +1062,55 @@ export class StargateService implements StargateServiceContract {
   }
 
   async changePassword(
+    scope: TenantScope,
     id: string,
     password: string,
     context: RequestContext
   ): Promise<void> {
-    await this.getAccount(id);
+    await this.getAccount(scope, id);
     requiredString(password, "PASSWORD_INVALID", "password is required");
     await db.$transaction([
-      db.session.deleteMany({ where: { accountId: id } }),
-      db.account.update({
+      db.session.deleteMany({
+        where: { accountId: id, tenantId: scope.tenantId },
+      }),
+      db.account.updateMany({
         data: {
           passwordAlgorithm: "legacy-md5",
           passwordChangedAt: new Date(),
           passwordHash: passwordHash(password),
         },
-        where: { id },
+        where: { id, tenantId: scope.tenantId },
       }),
     ]);
     await this.audit({
       accountId: id,
+      actorId: scope.actorId,
+      actorType: scope.actorType,
       context,
       eventType: "password.change",
       success: true,
+      tenantId: scope.tenantId,
     });
   }
 
-  async deleteAccount(id: string, context: RequestContext): Promise<void> {
-    const account = await db.account.findUnique({ where: { id } });
-    if (!account || account.deletedAt) {
+  async deleteAccount(
+    scope: TenantScope,
+    id: string,
+    context: RequestContext
+  ): Promise<void> {
+    const account = await db.account.findFirst({
+      where: { id, tenantId: scope.tenantId },
+    });
+    if (!account) {
+      throw serviceError("ACCOUNT_NOT_FOUND", "account not found", "not_found");
+    }
+    if (account.deletedAt) {
       return;
     }
     const [, deleted] = await db.$transaction([
-      db.session.deleteMany({ where: { accountId: id } }),
+      db.session.deleteMany({
+        where: { accountId: id, tenantId: scope.tenantId },
+      }),
       db.account.updateMany({
         data: {
           deletedAt: new Date(),
@@ -686,7 +1118,7 @@ export class StargateService implements StargateServiceContract {
           phone: null,
           username: `deleted:${account.id}`,
         },
-        where: { deletedAt: null, id },
+        where: { deletedAt: null, id, tenantId: scope.tenantId },
       }),
     ]);
     if (deleted.count === 0) {
@@ -694,14 +1126,25 @@ export class StargateService implements StargateServiceContract {
     }
     await this.audit({
       accountId: id,
+      actorId: scope.actorId,
+      actorType: scope.actorType,
       context,
       eventType: "account.delete",
       metadata: { reason: "account_delete" },
       success: true,
+      tenantId: scope.tenantId,
     });
   }
 
-  async login(input: LoginInput, context: RequestContext): Promise<AuthTokens> {
+  async login(
+    tenantHeader: string | undefined,
+    input: LoginInput,
+    context: RequestContext
+  ): Promise<AuthTokens> {
+    const tenantId = await this.resolvePublicTenant(
+      tenantHeader,
+      "LOGIN_INVALID"
+    );
     const rawLogin = requiredString(
       input.login,
       "LOGIN_IDENTIFIER_INVALID",
@@ -709,7 +1152,11 @@ export class StargateService implements StargateServiceContract {
     ).trim();
     const normalizedLogin = this.normalizeLoginForLookup(rawLogin);
     requiredString(input.password, "PASSWORD_INVALID", "password is required");
-    const failureKey = this.redisKey(LOGIN_FAILURE_PREFIX, normalizedLogin);
+    const failureKey = this.redisKey(
+      LOGIN_FAILURE_PREFIX,
+      tenantId,
+      normalizedLogin
+    );
     const failures = Number(
       (await withRedisTimeout(getRedisClient().get(failureKey))) ?? "0"
     );
@@ -720,8 +1167,14 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    if (!(await this.verifyCaptcha(input.captchaId, input.captchaCode))) {
-      await this.loginFailure(failureKey, context);
+    if (
+      !(await this.verifyCaptchaForTenant(
+        tenantId,
+        input.captchaId,
+        input.captchaCode
+      ))
+    ) {
+      await this.loginFailure(failureKey, tenantId, context);
       throw serviceError(
         "CAPTCHA_INVALID",
         "captcha is invalid or expired",
@@ -735,6 +1188,7 @@ export class StargateService implements StargateServiceContract {
           { email: normalizedLogin },
           { phone: normalizedLogin },
         ],
+        tenantId,
       },
     });
     if (
@@ -744,7 +1198,7 @@ export class StargateService implements StargateServiceContract {
       account.deletedAt ||
       !verifyPassword(account.passwordHash, input.password)
     ) {
-      await this.loginFailure(failureKey, context, account?.id);
+      await this.loginFailure(failureKey, tenantId, context, account?.id);
       throw serviceError(
         "LOGIN_INVALID",
         "invalid login or password",
@@ -762,20 +1216,25 @@ export class StargateService implements StargateServiceContract {
         expiresAt,
         refreshKeyHash: hmac(this.settings.primary.secret, refreshKey),
         refreshKeyHmacKeyId: this.settings.primary.id,
+        tenantId,
       },
     });
     const token = signAccessToken({
       accountId: account.id,
       secret: this.settings.jwtSecret,
       sessionId: session.id,
+      tenantId,
       ttlSeconds: this.settings.tokenTtlSeconds,
     });
     await this.audit({
       accountId: account.id,
+      actorId: account.id,
+      actorType: "account",
       context,
       eventType: "login",
       sessionId: session.id,
       success: true,
+      tenantId,
     });
     return {
       accessToken: token.token,
@@ -784,11 +1243,13 @@ export class StargateService implements StargateServiceContract {
       refreshExpiresAt: toIso(expiresAt),
       refreshKey,
       sessionId: session.id,
+      tenantId,
     };
   }
 
   private async loginFailure(
     key: string,
+    tenantId: string,
     context: RequestContext,
     accountId?: string
   ): Promise<void> {
@@ -803,9 +1264,12 @@ export class StargateService implements StargateServiceContract {
     );
     await this.audit({
       accountId,
+      actorId: accountId,
+      actorType: accountId ? "account" : "anonymous",
       context,
       eventType: "login",
       success: false,
+      tenantId,
     });
   }
 
@@ -828,44 +1292,60 @@ export class StargateService implements StargateServiceContract {
   }
 
   async refresh(
+    tenantHeader: string | undefined,
     refreshKey: string,
     context: RequestContext
   ): Promise<AuthTokens> {
-    const candidates = [this.settings.primary, this.settings.secondary].filter(
-      (key): key is { id: string; secret: string } => Boolean(key)
+    const tenantId = await this.resolvePublicTenant(
+      tenantHeader,
+      "REFRESH_INVALID"
     );
-    const sessions = (
-      await Promise.all(
-        candidates.map((key) =>
-          db.session.findMany({
-            where: {
-              expiresAt: { gt: new Date() },
-              refreshKeyHash: hmac(key.secret, refreshKey),
-              refreshKeyHmacKeyId: key.id,
-            },
-          })
-        )
-      )
-    ).flat();
+    const candidates = [this.settings.primary, this.settings.secondary]
+      .filter((key): key is { id: string; secret: string } => key !== undefined)
+      .map((key) => ({
+        refreshKeyHash: hmac(key.secret, refreshKey),
+        refreshKeyHmacKeyId: key.id,
+      }));
+    const sessions = await db.session.findMany({
+      where: {
+        expiresAt: { gt: new Date() },
+        OR: candidates,
+        tenantId,
+      },
+    });
     if (sessions.length !== 1) {
-      await this.audit({ context, eventType: "refresh", success: false });
+      await this.audit({
+        actorType: "anonymous",
+        context,
+        eventType: "refresh",
+        success: false,
+        tenantId,
+      });
       throw serviceError(
         "REFRESH_INVALID",
         "refresh key is invalid",
         "unauthenticated"
       );
     }
-    const session = sessions[0];
-    const account = await db.account.findUnique({
-      where: { id: session.accountId },
+    const session = sessions[0] as (typeof sessions)[number];
+    const account = await db.account.findFirst({
+      where: { id: session.accountId, tenantId },
     });
-    if (!account || account.deletedAt || account.status !== "active") {
+    if (
+      !account ||
+      account.deletedAt ||
+      account.status !== "active" ||
+      session.tenantId !== account.tenantId
+    ) {
       await this.audit({
         accountId: session.accountId,
+        actorId: session.accountId,
+        actorType: "account",
         context,
         eventType: "refresh",
         sessionId: session.id,
         success: false,
+        tenantId,
       });
       throw serviceError(
         "REFRESH_INVALID",
@@ -877,14 +1357,18 @@ export class StargateService implements StargateServiceContract {
       accountId: account.id,
       secret: this.settings.jwtSecret,
       sessionId: session.id,
+      tenantId,
       ttlSeconds: this.settings.tokenTtlSeconds,
     });
     await this.audit({
       accountId: account.id,
+      actorId: account.id,
+      actorType: "account",
       context,
       eventType: "refresh",
       sessionId: session.id,
       success: true,
+      tenantId,
     });
     return {
       accessToken: token.token,
@@ -893,34 +1377,434 @@ export class StargateService implements StargateServiceContract {
       refreshExpiresAt: toIso(session.expiresAt),
       refreshKey,
       sessionId: session.id,
+      tenantId,
     };
   }
 
-  async listSessions(accountId: string): Promise<Session[]> {
-    await this.getAccount(accountId);
+  async logout(
+    tenantHeader: string | undefined,
+    authorization: string | undefined,
+    context: RequestContext
+  ): Promise<void> {
+    let tenantId: string;
+    try {
+      tenantId = this.parseTenantHeader(tenantHeader) ?? DEFAULT_TENANT_ID;
+    } catch {
+      throw serviceError(
+        "ACCESS_TOKEN_INVALID",
+        "access token is invalid",
+        "unauthenticated"
+      );
+    }
+    const claims = this.accessTokenClaims(authorization);
+    if (claims.tenantId !== tenantId) {
+      throw serviceError(
+        "ACCESS_TOKEN_INVALID",
+        "access token is invalid",
+        "unauthenticated"
+      );
+    }
+    await db.session.deleteMany({
+      where: {
+        accountId: claims.accountId,
+        id: claims.sessionId,
+        tenantId,
+      },
+    });
+    await this.audit({
+      accountId: claims.accountId,
+      actorId: claims.accountId,
+      actorType: "account",
+      context,
+      eventType: "logout",
+      metadata: { reason: "logout" },
+      sessionId: claims.sessionId,
+      success: true,
+      tenantId,
+    });
+  }
+
+  async listSessions(
+    scope: TenantScope,
+    accountId: string
+  ): Promise<Session[]> {
+    await this.getAccount(scope, accountId);
     const sessions = await db.session.findMany({
       orderBy: { createdAt: "asc" },
-      where: { accountId, expiresAt: { gt: new Date() } },
+      where: {
+        accountId,
+        expiresAt: { gt: new Date() },
+        tenantId: scope.tenantId,
+      },
     });
     return sessions.map(publicSession);
   }
 
+  // biome-ignore lint/nursery/useMaxParams: Ticket #232 freezes this public contract with TenantScope first.
   async revokeSessions(
+    scope: TenantScope,
     accountId: string,
     context: RequestContext,
     reason: string,
     sessionId?: string
   ): Promise<void> {
+    await this.getAccount(scope, accountId);
     await db.session.deleteMany({
-      where: sessionId ? { accountId, id: sessionId } : { accountId },
+      where: {
+        accountId,
+        ...(sessionId ? { id: sessionId } : {}),
+        tenantId: scope.tenantId,
+      },
     });
     await this.audit({
       accountId,
+      actorId: scope.actorId,
+      actorType: scope.actorType,
       context,
       eventType: reason === "logout" ? "logout" : "session.revoke",
       metadata: { reason },
       sessionId,
       success: true,
+      tenantId: scope.tenantId,
+    });
+  }
+
+  private generateTenantId(): string {
+    return `t${randomBytes(12).toString("hex")}`;
+  }
+
+  private async createTenantAttempt(
+    id: string,
+    name: string | null,
+    context: RequestContext
+  ): Promise<PublicTenant> {
+    const tenant = await db.$transaction(async (transaction) => {
+      const created = await transaction.tenant.create({
+        data: { id, name, status: "active" },
+      });
+      await this.writeAudit(transaction, {
+        actorType: "admin",
+        context,
+        eventType: "tenant.created",
+        success: true,
+        tenantId: id,
+      });
+      return created;
+    });
+    return publicTenant(tenant);
+  }
+
+  async createTenant(
+    _scope: AdminScope,
+    input: TenantInput,
+    context: RequestContext
+  ): Promise<PublicTenant> {
+    const name = input.name?.trim() || null;
+    if (input.id !== undefined) {
+      const id = this.assertTenantId(input.id);
+      try {
+        return await this.createTenantAttempt(id, name, context);
+      } catch (error) {
+        if (isPrismaCode(error, "P2002")) {
+          throw serviceError(
+            "TENANT_ALREADY_EXISTS",
+            "tenant already exists",
+            "conflict"
+          );
+        }
+        throw error;
+      }
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.createTenantAttempt(
+          this.generateTenantId(),
+          name,
+          context
+        );
+      } catch (error) {
+        if (!isPrismaCode(error, "P2002")) {
+          throw error;
+        }
+      }
+    }
+    throw serviceError(
+      "TENANT_ALREADY_EXISTS",
+      "could not allocate a unique tenant id",
+      "conflict"
+    );
+  }
+
+  async getTenant(_scope: AdminScope, tenantId: string): Promise<PublicTenant> {
+    this.assertTenantIdFormat(tenantId);
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) {
+      throw serviceError("TENANT_NOT_FOUND", "tenant not found", "not_found");
+    }
+    return publicTenant(tenant);
+  }
+
+  // biome-ignore lint/nursery/useMaxParams: Ticket #232 freezes this public contract with TenantScope first.
+  async listTenants(
+    _scope: AdminScope,
+    limit: number,
+    offset: number,
+    basePath: string,
+    name?: string
+  ): Promise<TenantCollection> {
+    const where = name === undefined ? {} : { name };
+    const [tenants, total] = await db.$transaction([
+      db.tenant.findMany({
+        orderBy: { createdAt: "desc" },
+        skip: offset,
+        take: limit,
+        where,
+      }),
+      db.tenant.count({ where }),
+    ]);
+    const nextOffset = offset + tenants.length;
+    const query = (next: number) => {
+      const page = `page[offset]=${next}&page[limit]=${limit}`;
+      return name === undefined
+        ? `${basePath}?${page}`
+        : `${basePath}?${page}&filter[name]=${encodeURIComponent(name)}`;
+    };
+    return {
+      data: tenants.map((tenant) => ({
+        attributes: publicTenant(tenant),
+        id: tenant.id,
+        type: "tenants" as const,
+      })),
+      links: {
+        self: query(offset),
+        ...(nextOffset < total ? { next: query(nextOffset) } : {}),
+      },
+      meta: { page: { limit, offset, total } },
+    };
+  }
+
+  private async tenantRecord(
+    transaction: Prisma.TransactionClient,
+    tenantId: string
+  ): Promise<Tenant> {
+    const tenant = await transaction.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) {
+      throw serviceError("TENANT_NOT_FOUND", "tenant not found", "not_found");
+    }
+    return tenant;
+  }
+
+  private async applyTenantStatus(
+    transaction: Prisma.TransactionClient,
+    current: Tenant,
+    status: TenantStatus | undefined,
+    context: RequestContext
+  ): Promise<void> {
+    if (status === undefined || status === current.status) {
+      return;
+    }
+    const updated = await transaction.tenant.updateMany({
+      data: { status },
+      where: { id: current.id, status: current.status },
+    });
+    if (updated.count === 1) {
+      await this.writeAudit(transaction, {
+        actorType: "admin",
+        context,
+        eventType: status === "active" ? "tenant.enabled" : "tenant.disabled",
+        success: true,
+        tenantId: current.id,
+      });
+    }
+  }
+
+  private async patchTenantTransaction(
+    transaction: Prisma.TransactionClient,
+    tenantId: string,
+    input: TenantPatchInput,
+    context: RequestContext
+  ): Promise<Tenant> {
+    const current = await this.tenantRecord(transaction, tenantId);
+    if (input.name !== undefined) {
+      await transaction.tenant.update({
+        data: { name: input.name?.trim() || null },
+        where: { id: tenantId },
+      });
+    }
+    await this.applyTenantStatus(transaction, current, input.status, context);
+    return this.tenantRecord(transaction, tenantId);
+  }
+
+  async patchTenant(
+    _scope: AdminScope,
+    tenantId: string,
+    input: TenantPatchInput,
+    context: RequestContext
+  ): Promise<PublicTenant> {
+    this.assertTenantIdFormat(tenantId);
+    if (tenantId === DEFAULT_TENANT_ID && input.name !== undefined) {
+      throw serviceError(
+        "PATCH_INVALID",
+        "default tenant cannot be renamed",
+        "invalid_argument"
+      );
+    }
+    const tenant = await db.$transaction((transaction) =>
+      this.patchTenantTransaction(transaction, tenantId, input, context)
+    );
+    return publicTenant(tenant);
+  }
+
+  async createTenantApiKey(
+    scope: TenantScope,
+    input: TenantApiKeyInput,
+    context: RequestContext
+  ): Promise<CreatedTenantApiKey> {
+    const body = randomBytes(24).toString("base64url");
+    const plaintext = `${TENANT_API_KEY_PREFIX}${body}`;
+    const digest = hmac(this.settings.tenantApiKeyPrimary.secret, plaintext);
+    const key = await db.$transaction(async (transaction) => {
+      const created = await transaction.tenantApiKey.create({
+        data: {
+          firstFour: body.slice(0, 4),
+          hash: digest,
+          hmacKeyId: this.settings.tenantApiKeyPrimary.id,
+          name: input.name?.trim() || null,
+          tenantId: scope.tenantId,
+        },
+      });
+      await this.writeAudit(transaction, {
+        actorId: scope.actorId,
+        actorType: scope.actorType,
+        context,
+        eventType: "tenant_api_key.created",
+        metadata: {
+          apiKeyId: created.id,
+          firstFour: created.firstFour,
+        },
+        success: true,
+        tenantId: scope.tenantId,
+      });
+      return created;
+    });
+    return { ...publicTenantApiKey(key), key: plaintext };
+  }
+
+  async listTenantApiKeys(
+    scope: TenantScope,
+    limit: number,
+    offset: number,
+    basePath: string
+  ): Promise<TenantApiKeyCollection> {
+    const select = {
+      createdAt: true,
+      firstFour: true,
+      id: true,
+      name: true,
+      tenantId: true,
+      updatedAt: true,
+    } as const;
+    const [keys, total] = await db.$transaction([
+      db.tenantApiKey.findMany({
+        orderBy: { createdAt: "desc" },
+        select,
+        skip: offset,
+        take: limit,
+        where: { tenantId: scope.tenantId },
+      }),
+      db.tenantApiKey.count({ where: { tenantId: scope.tenantId } }),
+    ]);
+    const nextOffset = offset + keys.length;
+    const query = (next: number) =>
+      `${basePath}?page[offset]=${next}&page[limit]=${limit}`;
+    return {
+      data: keys.map((key) => ({
+        attributes: publicTenantApiKey(key),
+        id: key.id,
+        type: "tenant-api-keys" as const,
+      })),
+      links: {
+        self: query(offset),
+        ...(nextOffset < total ? { next: query(nextOffset) } : {}),
+      },
+      meta: { page: { limit, offset, total } },
+    };
+  }
+
+  async patchTenantApiKey(
+    scope: TenantScope,
+    keyId: string,
+    input: TenantApiKeyPatchInput
+  ): Promise<PublicTenantApiKey> {
+    return await db.$transaction(async (transaction) => {
+      const updated = await transaction.tenantApiKey.updateMany({
+        data: { name: input.name?.trim() || null },
+        where: { id: keyId, tenantId: scope.tenantId },
+      });
+      if (updated.count === 0) {
+        throw serviceError(
+          "TENANT_API_KEY_NOT_FOUND",
+          "tenant API key not found",
+          "not_found"
+        );
+      }
+      const key = await transaction.tenantApiKey.findFirst({
+        select: {
+          createdAt: true,
+          firstFour: true,
+          id: true,
+          name: true,
+          tenantId: true,
+          updatedAt: true,
+        },
+        where: { id: keyId, tenantId: scope.tenantId },
+      });
+      if (!key) {
+        throw serviceError(
+          "TENANT_API_KEY_NOT_FOUND",
+          "tenant API key not found",
+          "not_found"
+        );
+      }
+      return publicTenantApiKey(key);
+    });
+  }
+
+  async deleteTenantApiKey(
+    scope: TenantScope,
+    keyId: string,
+    context: RequestContext
+  ): Promise<void> {
+    if (scope.actorType === "tenant_key" && scope.actorId === keyId) {
+      throw serviceError(
+        "TENANT_API_KEY_SELF_DELETE",
+        "tenant API key cannot delete itself",
+        "invalid_argument"
+      );
+    }
+    await db.$transaction(async (transaction) => {
+      const deleted = await transaction.tenantApiKey.deleteMany({
+        where: { id: keyId, tenantId: scope.tenantId },
+      });
+      if (deleted.count === 0) {
+        throw serviceError(
+          "TENANT_API_KEY_NOT_FOUND",
+          "tenant API key not found",
+          "not_found"
+        );
+      }
+      await this.writeAudit(transaction, {
+        actorId: scope.actorId,
+        actorType: scope.actorType,
+        context,
+        eventType: "tenant_api_key.deleted",
+        metadata: { apiKeyId: keyId },
+        success: true,
+        tenantId: scope.tenantId,
+      });
     });
   }
 }

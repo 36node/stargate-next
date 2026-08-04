@@ -28,7 +28,7 @@ Stargate Next 通过“身份认证与业务授权分离”解决这些问题。
 
 1. **身份与业务分离**：Stargate Next 拥有认证事实，Mekong 拥有业务用户与授权事实。
 2. **稳定标识关联**：两侧只通过稳定的 `accountId` 关联，不共享 ORM 模型或写路径。
-3. **JWT 最小化**：JWT 只表达账户与会话身份，不携带业务授权快照。
+3. **JWT 最小化**：JWT 只表达租户、账户与会话身份，不携带业务授权快照。
 4. **授权实时生效**：组织、角色和直接权限变更后，无需重新登录或重新签发 JWT。
 5. **契约优先**：OpenAPI 是公开接口的唯一契约来源，Playground 和 Mekong 通过生成的 SDK 调用。
 6. **安全默认**：密码、Captcha、Refresh Key、日志和审计均遵循最小暴露原则。
@@ -66,11 +66,13 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 
 | 对象 | 所有者 | 产品含义 |
 | --- | --- | --- |
+| Tenant | Stargate Next | 认证数据的逻辑隔离边界；不是业务组织或授权对象。 |
+| Tenant API Key | Stargate Next | 固定归属一个 Tenant 的服务凭证；明文只在创建时返回一次。 |
 | Account | Stargate Next | 可被认证的稳定人员主体，包含登录标识与状态。 |
 | Credential | Stargate Next | Account 的当前密码凭证及修改时间。 |
 | Captcha | Stargate Next / Redis | 登录前使用的短期、一次性人机校验。 |
 | Session | Stargate Next | Account 的可刷新登录会话。 |
-| Access Token | Stargate Next | 表达 `accountId` 与 `sessionId` 的短期访问凭证。 |
+| Access Token | Stargate Next | 表达 `tenantId`、`accountId` 与 `sessionId` 的短期访问凭证。 |
 | Auth Audit Event | Stargate Next | 登录、刷新、退出、账户和凭证操作的最小安全审计。 |
 | User Profile | Mekong | 与 Account 关联的业务展示资料；Phase A 由 Playground 模拟。 |
 | Organization | Mekong | 业务组织树及数据范围；Phase A 由 Playground 模拟。 |
@@ -82,6 +84,8 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 
 ### 6.1 Stargate Next 拥有
 
+- Tenant 的稳定 `tenantId`、展示名称与 `active` / `disabled` 状态。
+- Tenant API Key 的 HMAC 摘要、归属与展示元数据；不保存 Key 明文。
 - `accountId`，由 Stargate Next 生成，默认使用 CUID。
 - 账户状态：`active`、`disabled` 及软删除状态。
 - 登录标识：username、登录用途的 phone/email。
@@ -90,7 +94,7 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 - Captcha、登录失败限制等短期认证状态。
 - 最小认证审计。
 
-登录标识规则：
+登录标识规则（唯一性均以 Tenant 为边界）：
 
 - username 必须以字母开头，不含@等特殊符号，写入前 `trim` 并转为 lowercase。
 - email 必须符合邮箱格式，写入前 `trim` 并转为 lowercase。
@@ -122,9 +126,9 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 
 1. 用户请求并提交 Captcha。
 2. 用户使用 username、phone 或 email 与密码登录。
-3. Stargate Next 校验 Captcha、账户状态和密码，创建 Session。
-4. Stargate Next 返回 `accountId`、`sessionId`、Access Token 和 Refresh Key。
-5. 业务应用从 JWT 获得身份信息。
+3. Stargate Next 在同一 Tenant 内校验 Captcha、账户状态和密码，创建 Session。
+4. Stargate Next 返回 `tenantId`、`accountId`、`sessionId`、Access Token 和 Refresh Key。
+5. 业务应用从 JWT 获得 `{ tenantId, accountId, sessionId }` 身份信息。
 6. 业务应用按 `accountId` 从 Mekong 加载 Profile、组织和授权上下文。
 7. 页面或业务操作根据实时权限决定是否允许访问。
 
@@ -162,6 +166,7 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 
 认证核心：
 
+- Tenant 创建、查询、分页与状态/名称更新，以及 Tenant API Key 生命周期管理。
 - Account 创建、分页查询、单个查询、批量查询、更新、软删除。
 - 密码设置与修改。
 - Captcha 创建、验证、过期、一次性消费、错误次数和创建频率限制。
@@ -220,11 +225,28 @@ Playground 验收：
 - `POST /v1/accounts/{accountId}/password`
 - `GET /v1/accounts/{accountId}/sessions`
 - `DELETE /v1/accounts/{accountId}/sessions`
+- `POST /v1/tenants`
+- `GET /v1/tenants`
+- `GET /v1/tenants/{tenantId}`
+- `PATCH /v1/tenants/{tenantId}`
+- `POST /v1/tenant-api-keys`
+- `GET /v1/tenant-api-keys`
+- `PATCH /v1/tenant-api-keys/{keyId}`
+- `DELETE /v1/tenant-api-keys/{keyId}`
+
+内部管理接口的三类凭证职责如下：
+
+| 凭证 | Tenant 作用域 | 职责 |
+| --- | --- | --- |
+| `STARGATE_ADMIN_API_KEY` | 控制面无 Tenant；数据面由 `x-tenant-id` 明确选择，缺省 `default` | 管理 Tenant，并可代操作任意单一 Tenant 的数据与 API Key。 |
+| `STARGATE_API_KEY` | 固定 `default` | 兼容既有调用，只管理默认租户数据。 |
+| Tenant API Key | 固定为 Key 所属 Tenant | 管理同租户 Account、Session 与 Tenant API Key；不得扩权到其他 Tenant。 |
 
 JWT 只包含：
 
 - `sub`：`accountId`
 - `sid`：`sessionId`
+- `tid`：`tenantId`
 - `type`
 - `iat`
 - `exp`

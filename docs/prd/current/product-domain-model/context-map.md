@@ -7,6 +7,7 @@
 基本原则：
 
 - Stargate Next 拥有认证事实，Mekong 拥有业务身份与授权事实。
+- `tenantId` 是 Stargate Next 发布的认证隔离事实，不是 Mekong 的业务授权事实。
 - 双方只通过稳定的 `accountId` 关联，不共享 ORM model、数据库写路径或事务。
 - OpenAPI、生成 SDK 和 slim JWT 是认证上下文的发布语言。
 - Playground 只提供测试替身，不是业务事实来源。
@@ -22,7 +23,7 @@ flowchart LR
     end
 
     subgraph Stargate["Stargate Next"]
-        AUTH["认证上下文<br/>Account / Credential / Captcha<br/>Session / Token / Audit"]
+        AUTH["认证上下文<br/>Tenant / Account / Credential / Captcha<br/>Session / Token / Audit"]
         SDK["OpenAPI + Generated SDK"]
     end
 
@@ -58,7 +59,7 @@ flowchart LR
 
 | 上下文 | 所有者 | 拥有 | 不拥有 |
 | --- | --- | --- | --- |
-| 认证上下文 | Stargate Next | Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
+| 认证上下文 | Stargate Next | Tenant、Tenant API Key、Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
 | 业务身份与授权上下文 | Mekong | UserProfile、Organization、Membership、Role、Permission、Authorization Context | 密码、Account 状态、Auth Session |
 | 业务应用上下文 | bus-admin-web | 页面和业务用例、受保护资源 | 认证或授权主数据 |
 | Playground 验收上下文 | Stargate Next 项目 | 测试用业务客户端、slim session、Mekong test double | 生产或迁移数据 |
@@ -82,12 +83,14 @@ flowchart LR
 
 - AccountId 稳定且不复用。
 - OpenAPI 是唯一契约来源。
-- JWT 只包含 `sub`、`sid`、`type`、`iat`、`exp`。
+- JWT 只包含 `sub`、`sid`、`tid`、`type`、`iat`、`exp`。
+- Account、Session、Captcha、限流和认证审计均以 `tenantId` 隔离；缺少 Tenant header 的兼容调用落入 `default`。
 - 登录、Refresh、Logout、Account 和 Session 管理具有稳定语义。
 
 下游约束：
 
 - 不从 JWT 推断 Organization、Role 或 Permission。
+- 不把 `tid` 映射为 Organization、Role、Permission 或数据范围。
 - 不直接读取 Auth PostgreSQL。
 - 不复制密码、Session 或 Account active 状态为本地事实来源。
 - 只通过生成 SDK 或受控 adapter 调用 Auth。
@@ -102,7 +105,7 @@ flowchart LR
 
 应用负责：
 
-1. 校验 Access Token 并得到 `{ accountId, sessionId }`。
+1. 校验 Access Token 并得到 `{ tenantId, accountId, sessionId }`；用 `tenantId` 约束认证集成边界，但不据此授予业务权限。
 2. 按 `accountId` 加载当前 Authorization Context。
 3. 将 Permission 和 Organization Scope 应用于自己的业务资源。
 4. 区分 Token 无效、权限不足和上游服务异常，不在异常时提升权限。
@@ -142,6 +145,7 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 
 认证上下文发布以下能力：
 
+- Tenant 控制面，以及单一 Tenant 内的 Tenant API Key 管理。
 - Captcha 创建和验证。
 - Login、Refresh、Logout。
 - Account 创建、查询、更新、软删除和改密。
@@ -153,8 +157,10 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 - Auth 响应不包含 Profile 或业务授权。
 - API、日志和审计不暴露密码、Token、Captcha 或内部 hash。
 - API Key 只代表服务调用方，不映射为人员 Principal。
+- Admin API Key 是平台控制面凭证；兼容 Service API Key 固定 `default`；Tenant API Key 固定所属 Tenant。三者都不是业务授权主体。
+- 数据面通过 `x-tenant-id` 选择或校验单一 Tenant；Tenant 控制面不得被 client 级 Tenant header 污染。
 
-Access Token 只建立 Principal。业务应用仍须从 Mekong 加载当前授权上下文。
+Access Token 只建立 Principal。`tenantId` 只说明该 Principal 来自哪个认证隔离边界；业务应用仍须按 `accountId` 从 Mekong 加载当前授权上下文。
 
 ### 5.2 跨上下文流程
 

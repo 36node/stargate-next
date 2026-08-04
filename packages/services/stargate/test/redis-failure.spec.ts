@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => {
   const redisFailure = () => Promise.reject(new Error("redis unavailable"));
   return {
     accountFindFirst: vi.fn(),
+    tenantFindUnique: vi.fn().mockResolvedValue({
+      id: "default",
+      status: "active",
+    }),
     redis: {
       del: vi.fn(redisFailure),
       eval: vi.fn(redisFailure),
@@ -24,6 +28,7 @@ vi.mock("@repo/db", () => ({
   db: {
     account: { findFirst: mocks.accountFindFirst },
     authAuditEvent: { create: vi.fn() },
+    tenant: { findUnique: mocks.tenantFindUnique },
   },
 }));
 
@@ -41,6 +46,7 @@ import { checkStargateHealth, createStargateService } from "../src/service";
 
 const config: StargateConfig = {
   accountCreateIdempotencyTtlSeconds: 3600,
+  adminApiKey: "admin-api-key",
   apiKey: "api-key",
   captchaAttempts: 5,
   captchaCreateLimit: 30,
@@ -48,6 +54,7 @@ const config: StargateConfig = {
   captchaHmacSecret: "captcha-secret",
   captchaTtlSeconds: 300,
   clockToleranceSeconds: 30,
+  deployTier: "test",
   jwtSecret: "jwt-secret",
   loginAttempts: 5,
   loginLockSeconds: 60,
@@ -55,6 +62,10 @@ const config: StargateConfig = {
   redisKeyPrefix: "redis-failure:",
   refreshTtlSeconds: 604_800,
   testCaptcha: true,
+  tenantApiKeyPrimary: {
+    id: "tenant-primary",
+    secret: "tenant-primary-secret",
+  },
   tokenTtlSeconds: 3600,
 };
 
@@ -65,19 +76,26 @@ beforeEach(() => {
 describe("redis failure handling", () => {
   it("does not return a captcha when rate limiting is unavailable", async () => {
     await expect(
-      createStargateService(config).createCaptcha({ ip: "203.0.113.1" })
+      createStargateService(config).createCaptcha(undefined, {
+        ip: "203.0.113.1",
+      })
     ).rejects.toThrow("redis unavailable");
   });
 
   it("never accepts a captcha when storage is unavailable", async () => {
     await expect(
-      createStargateService(config).verifyCaptcha("captcha-1", "ABCD")
+      createStargateService(config).verifyCaptcha(
+        undefined,
+        "captcha-1",
+        "ABCD"
+      )
     ).rejects.toThrow("redis unavailable");
   });
 
   it("does not query accounts when the login lock cannot be checked", async () => {
     await expect(
       createStargateService(config).login(
+        undefined,
         {
           captchaCode: "ABCD",
           captchaId: "captcha-1",

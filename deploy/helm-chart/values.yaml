@@ -20,6 +20,7 @@ stargateNext:
     port: 9527
   config:
     nodeEnv: production
+    deployTier: production
     logLevel: info
     redisKeyPrefix: "stargate-next:"
     accessTokenTtlSeconds: "3600"
@@ -36,6 +37,7 @@ stargateNext:
   secrets:
     databaseUrl: ""
     redisUrl: ""
+    stargateAdminApiKey: ""
     stargateApiKey: ""
     stargateJwtSecret: ""
     captchaHmacSecret: ""
@@ -43,6 +45,10 @@ stargateNext:
     refreshKeyHmacPrimarySecret: ""
     refreshKeyHmacSecondaryKeyId: ""
     refreshKeyHmacSecondarySecret: ""
+    tenantApiKeyHmacPrimaryKeyId: ""
+    tenantApiKeyHmacPrimarySecret: ""
+    tenantApiKeyHmacSecondaryKeyId: ""
+    tenantApiKeyHmacSecondarySecret: ""
   resources: {}
   podAnnotations: {}
   nodeSelector: {}

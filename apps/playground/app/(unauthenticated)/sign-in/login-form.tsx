@@ -4,6 +4,7 @@ import { useActionState, useCallback, useEffect, useState } from "react";
 
 import { type LoginState, loginAction } from "./action";
 import { CaptchaInput } from "./captcha-input";
+import { captchaUrl } from "./captcha-url";
 
 const initialState: LoginState = {};
 
@@ -13,22 +14,29 @@ export function LoginForm({
   captchaEnabled,
   defaultCaptcha,
   from,
+  initialTenant,
+  tenantOptions,
 }: {
   captchaEnabled: boolean;
   defaultCaptcha?: Captcha;
   from?: string;
+  initialTenant: string;
+  tenantOptions: readonly string[];
 }) {
   const [state, action, pending] = useActionState(loginAction, initialState);
   const [captcha, setCaptcha] = useState<Captcha | undefined>(defaultCaptcha);
   const [captchaCode, setCaptchaCode] = useState("");
+  const [tenant, setTenant] = useState(initialTenant);
   const [captchaLoading, setCaptchaLoading] = useState(
     captchaEnabled && !defaultCaptcha
   );
 
-  const loadCaptcha = useCallback(async () => {
+  const loadCaptcha = useCallback(async (selectedTenant: string) => {
     setCaptchaLoading(true);
     try {
-      const response = await fetch("/api/captcha", { cache: "no-store" });
+      const response = await fetch(captchaUrl(selectedTenant), {
+        cache: "no-store",
+      });
       const data = (await response.json()) as {
         enabled: boolean;
         id?: string;
@@ -47,13 +55,34 @@ export function LoginForm({
 
   useEffect(() => {
     if (captchaEnabled && !defaultCaptcha) {
-      loadCaptcha().catch(() => setCaptcha(undefined));
+      loadCaptcha(initialTenant).catch(() => setCaptcha(undefined));
     }
-  }, [captchaEnabled, defaultCaptcha, loadCaptcha]);
+  }, [captchaEnabled, defaultCaptcha, initialTenant, loadCaptcha]);
 
   return (
     <form action={action} className="login-form">
       <input name="from" type="hidden" value={from} />
+      {captchaEnabled ? (
+        <label>
+          租户
+          <select
+            name="tenantId"
+            onChange={(event) => {
+              const selectedTenant = event.target.value;
+              setTenant(selectedTenant);
+              setCaptchaCode("");
+              loadCaptcha(selectedTenant).catch(() => setCaptcha(undefined));
+            }}
+            value={tenant}
+          >
+            {tenantOptions.map((tenantId) => (
+              <option key={tenantId} value={tenantId}>
+                {tenantId}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         账号
         <input
@@ -82,7 +111,7 @@ export function LoginForm({
             loading={captchaLoading}
             onCodeChange={setCaptchaCode}
             onRefresh={() => {
-              loadCaptcha().catch(() => setCaptcha(undefined));
+              loadCaptcha(tenant).catch(() => setCaptcha(undefined));
             }}
           />
         </fieldset>

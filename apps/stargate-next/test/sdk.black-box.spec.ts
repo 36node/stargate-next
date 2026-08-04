@@ -1,6 +1,5 @@
+import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
-
-import { StargateNextClient } from "../../../packages/stargate-next-sdk/src";
 
 function env(name: string): string {
   const value = process.env[name];

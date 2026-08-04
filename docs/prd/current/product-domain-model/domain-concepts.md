@@ -6,7 +6,7 @@
 
 建模遵循以下边界：
 
-- Stargate Next 负责账户、登录标识、密码凭证、认证、Session、Access Token、Captcha 和认证审计。
+- Stargate Next 负责 Tenant、Tenant API Key、账户、登录标识、密码凭证、认证、Session、Access Token、Captcha 和认证审计。
 - Mekong 负责 User Profile、Organization、Membership、Role、Permission 和业务授权。
 - Playground 在 Phase A 模拟 Mekong 概念，但不因此获得这些数据的所有权。
 - 两个领域只通过 `accountId` 关联，不共享聚合、数据库模型或事务。
@@ -19,12 +19,14 @@
 
 | 术语 | 定义 | 不表示 |
 | --- | --- | --- |
+| Tenant（租户） | Stargate Next 认证数据的逻辑隔离边界。 | 不等于旧 Auth Namespace、Mekong Organization、Role 或 Permission。 |
+| Tenant ID | Tenant 的稳定主键，也是 `x-tenant-id` 与 JWT `tid` 的值。 | 不由 Tenant name 推导，也不是业务授权范围。 |
 | Account（账户） | 可被 Stargate Next 认证的稳定主体。 | 不等于完整业务用户，不包含姓名、组织和权限。 |
 | Account ID | Account 的全局稳定标识，也是 JWT 的 `sub`。新账户默认由 Stargate Next 生成 CUID。 | 不由 username、phone 或 email 推导。 |
 | Login Identifier（登录标识） | 用于定位 Account 的 username、登录 phone 或登录 email。 | 不等于 Mekong 中的业务联系方式。 |
 | Credential（凭证） | 证明登录者掌握账户秘密的信息；MVP 仅指当前密码凭证。 | 不对外暴露的密码 hash 不是 API 数据。 |
 | Authentication（认证） | 验证登录者身份并建立 Session 的过程。 | 不计算业务权限。 |
-| Principal（身份主体） | Access Token 验证后得到的 `{ accountId, sessionId }`。 | 不包含 Profile、Organization、Role 或 Permission。 |
+| Principal（身份主体） | Access Token 验证后得到的 `{ tenantId, accountId, sessionId }`。 | `tenantId` 只表达认证隔离，不包含 Profile、Organization、Role 或 Permission。 |
 | Account Status（账户状态） | Account 是否允许认证的状态，当前为 `active` 或 `disabled`。 | 软删除不是第三种可恢复的登录状态。 |
 | Soft Delete（软删除） | 终止 Account 使用并释放登录标识，同时保留历史 Account ID。 | 不代表物理删除审计记录。 |
 
@@ -32,7 +34,7 @@
 
 | 术语 | 定义 | 关键语义 |
 | --- | --- | --- |
-| Session（会话） | 一次可持续刷新的登录关系，关联一个 Account。 | 是 Refresh 的事实来源，不保存业务授权快照。 |
+| Session（会话） | 一次可持续刷新的登录关系，关联同一 Tenant 内的一个 Account。 | 是 Refresh 的事实来源，不保存业务授权快照。 |
 | Session ID | Session 的稳定标识，也是 JWT 的 `sid`。 | MVP Refresh 时保持不变。 |
 | Refresh Key | 创建 Session 时仅向调用方返回的随机秘密，用于刷新 Access Token。 | 服务端不存明文。 |
 | Refresh Key Hash | 使用指定 HMAC key 计算并持久化的 Refresh Key 摘要。 | 不能作为 Refresh Key 返回或用于登录。 |
@@ -45,11 +47,24 @@
 | 术语 | 定义 | 关键语义 |
 | --- | --- | --- |
 | Captcha | 登录前的人机验证挑战。 | 短期、一次性、有尝试次数限制。 |
-| Login Failure Counter | 按规范化 login 记录的短期失败次数。 | Captcha 失败和凭证失败都计入。 |
+| Login Failure Counter | 按 Tenant 与规范化 login 记录的短期失败次数。 | Captcha 失败和凭证失败都计入，但不得跨 Tenant 累加。 |
 | Login Lock | 失败次数达到阈值后对该 login 的临时阻断。 | 不是 Account Status，不永久修改 Account。 |
 | Auth Audit Event | 对认证和账户安全操作的不可变事实记录。 | 不是可编辑业务日志，不保存秘密。 |
 | Request Context | 请求 ID、IP、User-Agent 等审计上下文。 | 不参与领域身份判断。 |
-| API Key | MVP 中业务服务访问内部管理 API 的共享服务凭证。 | 不映射为人员 Account 或 Session。 |
+| Admin API Key | 平台控制面信任根，可管理 Tenant，并在数据面选择一个 Tenant 代操作。 | 不映射为人员 Account、Session 或业务权限。 |
+| Service API Key | 兼容现网的共享服务凭证，固定绑定 `default` Tenant。 | 不是平台全局权限，不可扩权到其他 Tenant。 |
+| Tenant API Key | 数据库存 HMAC 摘要、固定归属一个 Tenant 的服务凭证。 | 不映射为人员 Account、Session 或业务权限。 |
+
+多租户控制面与数据面新增以下稳定错误码：
+
+- `BODY_INVALID`：请求体不是对象、含未知字段或字段类型不合法。
+- `TENANT_ID_INVALID`：创建 Tenant 时指定的 ID 不符合约束或使用保留值 `default`。
+- `TENANT_ALREADY_EXISTS`：指定 Tenant ID 已存在。
+- `TENANT_INVALID`：管理数据面的 Tenant header 非法、未知或不可进入。
+- `TENANT_DISABLED`：管理数据面的目标 Tenant 已停用。
+- `TENANT_NOT_FOUND`：Admin 控制面按路径查询的 Tenant 不存在。
+- `TENANT_API_KEY_NOT_FOUND`：当前 Tenant 内不存在目标 API Key。
+- `TENANT_API_KEY_SELF_DELETE`：Tenant API Key 尝试删除自身。
 
 ### 2.4 Mekong 业务身份与授权
 
@@ -78,7 +93,17 @@
 
 ## 3. 标识与值对象
 
-### 3.1 AccountId
+### 3.1 TenantId
+
+`TenantId` 是不可变字符串值对象：
+
+- 创建后不得修改；`default` 是内置保留值。
+- 自定义值严格匹配 `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`，长度为 1..63；不 trim、不折叠大小写。
+- 请求完全缺少 `x-tenant-id` 时才落入 `default`；显式空串、空白、大写或非法格式必须拒绝。
+- Tenant 的 `name` 只是可空展示文本，不参与路由、认证或唯一性判断。
+- Tenant 状态为 `active` 或 `disabled`；disabled 时拒绝管理数据面、Login 与 Refresh。
+
+### 3.2 AccountId
 
 `AccountId` 是不可变字符串值对象：
 
@@ -88,7 +113,7 @@
 - Auth 与 Mekong 使用完全相同的字符串值关联数据。
 - `AccountId` 不是两个数据库之间的外键，跨库一致性由编排和对账保证。
 
-### 3.2 SessionId
+### 3.3 SessionId
 
 `SessionId` 是 Session 的不可变标识：
 
@@ -97,9 +122,9 @@
 - MVP Refresh 不生成新 SessionId。
 - Session 被撤销后，原 SessionId 不得重新用于新 Session。
 
-### 3.3 LoginIdentifier
+### 3.4 LoginIdentifier
 
-`LoginIdentifier` 是 username、phone 或 email 三种值对象的联合概念。三种标识在 Account 中分别唯一，并在查询前采用与写入一致的规范化规则。
+`LoginIdentifier` 是 username、phone 或 email 三种值对象的联合概念。三种标识在同一 Tenant 的 Account 中分别唯一，并在查询前采用与写入一致的规范化规则；跨 Tenant 可重复。
 
 #### Username
 
@@ -114,7 +139,7 @@
 - 可选。
 - 写入与查询前执行 `trim().toLowerCase()`。
 - 必须符合 email 格式。
-- 规范化后的值全局唯一。
+- 规范化后的值在 Tenant 内唯一。
 
 #### LoginPhone
 
@@ -127,7 +152,7 @@
 
 phone/email 只在承担登录语义时属于 LoginIdentifier。Mekong 中的 contact phone/email 是不同值对象，即使字符串相同也不能隐式同步。
 
-### 3.4 PasswordCredential
+### 3.5 PasswordCredential
 
 MVP 的 `PasswordCredential` 由以下值组成：
 
@@ -143,7 +168,7 @@ MVP 的 `PasswordCredential` 由以下值组成：
 - 凭证属于 Account 认证边界，不单独成为可公开查询的实体。
 - `legacy-md5` 只用于 MVP 兼容，不代表目标安全算法。
 
-### 3.5 RefreshKeyDigest
+### 3.6 RefreshKeyDigest
 
 `RefreshKeyDigest` 是服务端持有的值对象：
 
@@ -154,12 +179,22 @@ MVP 的 `PasswordCredential` 由以下值组成：
 - primary 与 secondary 的 key ID 和 secret 必须分别不同。
 - key ID 与 hash 必须按同一组 secret 计算，禁止跨组拼接匹配。
 
-### 3.6 AccessTokenClaims
+### 3.7 TenantApiKeyDigest
+
+`TenantApiKeyDigest` 是 `{ hmacKeyId, hash }` 值对象：
+
+- `hash = HMAC-SHA256(secret, fullTenantApiKey)`，`(hmacKeyId, hash)` 全局唯一。
+- 新 Key 只用 primary 创建；验证时全量计算 primary 与可选 secondary 候选，再做一次精确查询与最终常量时间复核。
+- 明文只在创建响应出现一次；列表、审计、日志和数据库均不得包含明文。
+- `firstFour` 仅是随机主体前四位的展示元数据，不参与认证。
+
+### 3.8 AccessTokenClaims
 
 MVP 的 Access Token 只允许包含：
 
 - `sub`：AccountId。
 - `sid`：SessionId。
+- `tid`：TenantId。
 - `type`：固定为 `access`。
 - `iat`：签发时间。
 - `exp`：过期时间。
@@ -168,7 +203,9 @@ MVP 的 Access Token 只允许包含：
 
 `ns`、`roles`、`permissions`、`groups` 不属于该值对象。新增 claim 必须先证明属于认证事实，而不是某个业务应用的授权事实。
 
-### 3.7 IdempotencyKey
+校验成功建立 `{ tenantId, accountId, sessionId }`；`tid` 是认证隔离事实，不是 Mekong 业务授权事实。
+
+### 3.9 IdempotencyKey
 
 Account 创建命令可携带 `IdempotencyKey`：
 
@@ -188,6 +225,7 @@ Account 是认证域核心实体，具有稳定 `AccountId` 和生命周期。
 主要属性：
 
 - AccountId。
+- TenantId。
 - AccountStatus。
 - Username。
 - 可选 LoginPhone。
@@ -197,8 +235,8 @@ Account 是认证域核心实体，具有稳定 `AccountId` 和生命周期。
 
 Account 负责维持以下不变量：
 
-- 始终拥有合法且唯一的 username。
-- phone/email 存在时必须合法且唯一。
+- 始终拥有合法且在 Tenant 内唯一的 username。
+- phone/email 存在时必须合法且在 Tenant 内唯一。
 - 只有 active 且未删除的 Account 可以登录或 Refresh。
 - 密码只能通过专用改密行为更新。
 - 对外表示不得包含 PasswordCredential。
@@ -211,6 +249,7 @@ Session 是独立实体，通过 AccountId 引用 Account。
 主要属性：
 
 - SessionId。
+- TenantId，且必须与关联 Account 的 TenantId 相同。
 - AccountId。
 - RefreshKeyDigest。
 - `expiresAt`。
@@ -232,6 +271,7 @@ CaptchaChallenge 是存放于 Redis 的短生命周期实体。
 主要属性：
 
 - CaptchaId。
+- TenantId。
 - code hash。
 - 过期时间。
 - 已失败尝试次数。
@@ -258,6 +298,7 @@ AuthAuditEvent 是不可变、仅追加的安全事实实体。
 主要属性：
 
 - EventId 与 eventType。
+- TenantId。
 - 可选 AccountId、SessionId。
 - success。
 - actorType 与可选 actorId。
@@ -272,6 +313,7 @@ AuthAuditEvent 是不可变、仅追加的安全事实实体。
 - Account 创建、更新、禁用和删除。
 - 密码修改。
 - Session 撤销。
+- Tenant 创建、启用、停用，以及 Tenant API Key 创建、删除。
 
 审计事件不强制外键关联 Account 或 Session，以便主体或 Session 删除后仍保留历史。metadata 禁止包含密码、Captcha code、Access Token、Refresh Key 或任何凭证 hash。
 
@@ -315,6 +357,8 @@ Playground 中的同名对象是测试替身，只用于验证契约和场景，
 - SoftDeleteAccount。
 
 Account 聚合内的字段修改应在单一数据库事务中保持一致。改密、删除等同时撤销 Session 的用例需要应用服务协调 Account 与 Session repository，并在 Stargate Next 数据库事务中完成。
+
+Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant；Tenant disabled 不删除 Account、Session、Key 或历史审计。Tenant 名称更新不改变路由，`default` Tenant 不允许改名。
 
 ### 5.2 Session 聚合
 
@@ -366,14 +410,15 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 
 认证服务编排登录：
 
-1. 规范化 login。
-2. 检查 Login Lock。
-3. 验证并消费 Captcha。
-4. 按任一 LoginIdentifier 查找 Account。
-5. 统一校验 Account 状态、删除状态、密码算法和密码。
-6. 创建 Session 与 Refresh Key。
-7. 签发 Access Token。
-8. 清除登录失败计数并记录审计。
+1. 精确解析 Tenant，并确认状态为 `active`。
+2. 规范化 login。
+3. 检查该 Tenant 的 Login Lock。
+4. 在该 Tenant 验证并消费 Captcha。
+5. 在该 Tenant 按任一 LoginIdentifier 查找 Account。
+6. 统一校验 Account 状态、删除状态、密码算法和密码。
+7. 创建带相同 TenantId 的 Session 与 Refresh Key。
+8. 签发含 `tid` 的 Access Token。
+9. 只清除该 Tenant 的登录失败计数并记录审计。
 
 为避免账户枚举，对“账户不存在、状态不可用、密码错误”等场景应返回统一的登录失败语义。
 
@@ -382,16 +427,16 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 刷新服务：
 
 1. 分别使用 primary 和可选 secondary HMAC key 计算候选 RefreshKeyDigest。
-2. 按对应 `(keyId, hash)` 查找唯一、未过期 Session。
-3. 校验关联 Account active 且未删除。
-4. 为原 AccountId 与 SessionId 签发新 Access Token。
+2. 在请求 Tenant 内按对应 `(keyId, hash)` 查找唯一、未过期 Session。
+3. 校验 Session、Account 与请求 Tenant 一致，且 Account active、未删除。
+4. 为原 TenantId、AccountId 与 SessionId 签发新 Access Token。
 5. 返回原 Refresh Key，不更新 Session。
 
 找不到、找到多条、Session 过期或 Account 不可认证时，统一视为 Refresh 无效。
 
 ### 6.3 Login Throttling Policy
 
-- 失败计数按规范化 login 隔离。
+- 失败计数按 Tenant 与规范化 login 隔离。
 - Captcha 验证失败和账户/密码验证失败均增加计数。
 - 达到阈值后，在配置时间内拒绝继续登录。
 - 登录成功后清除计数。
@@ -412,8 +457,8 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 1. Token 是由三个非空部分组成的 JWT Compact Serialization，且 header、payload 均可正确执行 Base64URL 解码和 JSON 解析。
 2. header 的 `alg` 必须为 `HS256`，`typ` 必须为 `JWT`；拒绝 `none`、其他算法或与服务配置不一致的算法。
 3. 必须使用配置的 JWT signing secret 验证签名，并采用常量时间比较，避免根据 Token header 动态选择不受信任的算法或密钥。
-4. payload 必须包含类型正确的 `sub`、`sid`、`type`、`iat` 和 `exp`：
-   - `sub`、`sid` 是非空字符串。
+4. payload 必须包含类型正确的 `sub`、`sid`、`tid`、`type`、`iat` 和 `exp`：
+   - `sub`、`sid`、`tid` 是非空字符串。
    - `type` 严格等于 `access`。
    - `iat`、`exp` 是以秒为单位的整数 NumericDate。
    - `exp > iat`。
@@ -422,7 +467,7 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 
 MVP 的默认时钟容差为 30 秒，签发方与验证方必须使用相同配置，并通过 NTP 保持系统时间同步。容差只用于吸收服务器间的细微时钟误差，不能替代时间同步，也不得设置为与 Token TTL 接近的值。
 
-校验成功后只产生 `{ accountId: sub, sessionId: sid }`。MVP 不在每次请求中查询 Account 或 Session，因此：
+校验成功后只产生 `{ tenantId: tid, accountId: sub, sessionId: sid }`。`tenantId` 用于认证隔离，不授予任何 Mekong 权限。MVP 不在每次请求中查询 Account 或 Session，因此：
 
 - Logout、Session Revoke、Account Disable 或 Account Delete 会立即阻止后续 Refresh。
 - 已签发 Access Token 在签名和时间校验仍有效时，可继续使用到 `exp` 加时钟容差为止。
@@ -528,10 +573,12 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 
 ## 8. 关键业务不变量
 
-### 8.1 Account
+### 8.1 Tenant 与 Account
 
 - 有效 Account 必须有且仅有一个 username。
-- 规范化后的 username、phone、email 分别全局唯一。
+- 规范化后的 username、phone、email 分别在 Tenant 内唯一。
+- Account、Session、Captcha、Login Lock、Idempotency Key 与 AuthAuditEvent 均属于一个 Tenant；任何读取和写入都必须携带 Tenant 过滤。
+- 同一登录标识可在不同 Tenant 各自存在，不能通过全局 Account/Session ID 绕过 Tenant 边界。
 - 对 LoginIdentifier 的读取与写入必须使用相同规范化算法。
 - Account ID 创建后不可变。
 - 普通 Account patch 不接受 password。
@@ -545,6 +592,7 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - Refresh 必须同时验证 RefreshKeyDigest、Session 有效期和 Account 状态。
 - MVP Refresh 保持 Refresh Key、SessionId、Session expiry 和 `updatedAt` 不变。
 - JWT 只包含身份与会话 claims。
+- JWT 必须显式包含 `tid`，默认租户也必须是 `tid=default`。
 - Access Token 必须通过统一的格式、header、签名、claims 和时间校验后才能建立 Principal。
 - `iat` 是签发时间而非生效时间；MVP 不使用 `nbf`。
 - 所有签发方和验证方使用相同的小幅时钟容差，当前默认 30 秒。
@@ -554,8 +602,8 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 
 - Captcha code 不得明文持久化。
 - Captcha 只能成功消费一次。
-- Captcha 创建按客户端 IP 限流。
-- 登录失败按规范化 login 限流。
+- Captcha 创建按 Tenant 与客户端 IP 限流。
+- 登录失败按 Tenant 与规范化 login 限流。
 - Captcha 与 JWT、Refresh Key 不得复用 HMAC/signing secret。
 - 固定测试 code 只在显式启用的非生产隔离环境生效；不得绕过 CaptchaChallenge 的其他安全规则。
 

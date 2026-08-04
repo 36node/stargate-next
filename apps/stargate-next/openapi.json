@@ -24,6 +24,7 @@
     "/v1/captchas": {
       "post": {
         "operationId": "createCaptcha",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "responses": {
           "201": { "$ref": "#/components/responses/Captcha" },
           "429": { "$ref": "#/components/responses/Error" }
@@ -33,6 +34,7 @@
     "/v1/captchas/verify": {
       "post": {
         "operationId": "verifyCaptcha",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "requestBody": { "$ref": "#/components/requestBodies/VerifyCaptcha" },
         "responses": {
           "200": { "$ref": "#/components/responses/CaptchaVerification" },
@@ -43,6 +45,7 @@
     "/v1/auth/login": {
       "post": {
         "operationId": "login",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "requestBody": { "$ref": "#/components/requestBodies/Login" },
         "responses": {
           "200": { "$ref": "#/components/responses/AuthTokens" },
@@ -54,6 +57,7 @@
     "/v1/auth/refresh": {
       "post": {
         "operationId": "refresh",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "description": "Returns fresh credentials. Clients must replace their stored refresh key with refreshKey from every successful response; the key may be rotated even when the current implementation returns the existing value.",
         "requestBody": { "$ref": "#/components/requestBodies/Refresh" },
         "responses": {
@@ -66,6 +70,7 @@
     "/v1/auth/logout": {
       "post": {
         "operationId": "logout",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "security": [{ "bearerAccessToken": [] }],
         "responses": {
           "204": { "description": "session removed" },
@@ -74,6 +79,7 @@
       }
     },
     "/v1/accounts": {
+      "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
       "get": {
         "operationId": "listAccounts",
         "security": [{ "serviceApiKey": [] }],
@@ -114,6 +120,7 @@
     },
     "/v1/accounts/{accountId}": {
       "parameters": [
+        { "$ref": "#/components/parameters/TenantHeader" },
         {
           "in": "path",
           "name": "accountId",
@@ -147,13 +154,15 @@
         "security": [{ "serviceApiKey": [] }],
         "responses": {
           "204": { "description": "account deleted" },
-          "401": { "$ref": "#/components/responses/Error" }
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
         }
       }
     },
     "/v1/accounts/@batchGet": {
       "post": {
         "operationId": "batchGetAccounts",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
         "security": [{ "serviceApiKey": [] }],
         "requestBody": {
           "$ref": "#/components/requestBodies/BatchGetAccounts"
@@ -177,6 +186,7 @@
     },
     "/v1/accounts/{accountId}/password": {
       "parameters": [
+        { "$ref": "#/components/parameters/TenantHeader" },
         {
           "in": "path",
           "name": "accountId",
@@ -198,6 +208,7 @@
     },
     "/v1/accounts/{accountId}/sessions": {
       "parameters": [
+        { "$ref": "#/components/parameters/TenantHeader" },
         {
           "in": "path",
           "name": "accountId",
@@ -222,12 +233,175 @@
         ],
         "responses": {
           "204": { "description": "sessions removed" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/tenants": {
+      "get": {
+        "operationId": "listTenants",
+        "security": [{ "serviceApiKey": [] }],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page[offset]",
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "in": "query",
+            "name": "page[limit]",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter[name]",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/TenantCollection" },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "createTenant",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/CreateTenant" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Tenant" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/tenants/{tenantId}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "tenantId",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "operationId": "getTenant",
+        "security": [{ "serviceApiKey": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Tenant" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "operationId": "patchTenant",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/PatchTenant" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Tenant" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/tenant-api-keys": {
+      "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
+      "get": {
+        "operationId": "listTenantApiKeys",
+        "security": [{ "serviceApiKey": [] }],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page[offset]",
+            "schema": { "type": "integer", "minimum": 0, "default": 0 }
+          },
+          {
+            "in": "query",
+            "name": "page[limit]",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/TenantApiKeyCollection" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "createTenantApiKey",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CreateTenantApiKey"
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/CreatedTenantApiKey" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/tenant-api-keys/{keyId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/TenantHeader" },
+        {
+          "in": "path",
+          "name": "keyId",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "patch": {
+        "operationId": "patchTenantApiKey",
+        "security": [{ "serviceApiKey": [] }],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/PatchTenantApiKey"
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/TenantApiKey" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTenantApiKey",
+        "security": [{ "serviceApiKey": [] }],
+        "responses": {
+          "204": { "description": "tenant API key deleted" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
         }
       }
     }
   },
   "components": {
+    "parameters": {
+      "TenantHeader": {
+        "name": "x-tenant-id",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "description": "Target tenant id. Omitted means the built-in `default` tenant."
+      }
+    },
     "securitySchemes": {
       "serviceApiKey": {
         "type": "apiKey",
@@ -296,6 +470,42 @@
             "schema": { "$ref": "#/components/schemas/ChangePasswordInput" }
           }
         }
+      },
+      "CreateTenant": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/CreateTenantInput" }
+          }
+        }
+      },
+      "PatchTenant": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/PatchTenantInput" }
+          }
+        }
+      },
+      "CreateTenantApiKey": {
+        "required": false,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CreateTenantApiKeyInput"
+            }
+          }
+        }
+      },
+      "PatchTenantApiKey": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PatchTenantApiKeyInput"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -307,6 +517,7 @@
           "ACCOUNT_NOT_FOUND",
           "API_KEY_INVALID",
           "BATCH_INVALID",
+          "BODY_INVALID",
           "CAPTCHA_CODE_INVALID",
           "CAPTCHA_ID_INVALID",
           "CAPTCHA_INVALID",
@@ -323,6 +534,13 @@
           "PHONE_INVALID",
           "REFRESH_INVALID",
           "REFRESH_KEY_INVALID",
+          "TENANT_ALREADY_EXISTS",
+          "TENANT_API_KEY_NOT_FOUND",
+          "TENANT_API_KEY_SELF_DELETE",
+          "TENANT_DISABLED",
+          "TENANT_ID_INVALID",
+          "TENANT_INVALID",
+          "TENANT_NOT_FOUND",
           "USERNAME_INVALID"
         ]
       },
@@ -405,7 +623,8 @@
           "accountId",
           "refreshExpiresAt",
           "refreshKey",
-          "sessionId"
+          "sessionId",
+          "tenantId"
         ],
         "properties": {
           "accessToken": { "type": "string" },
@@ -417,7 +636,8 @@
             "writeOnly": true,
             "description": "Refresh key to persist for the next refresh. It may differ from the submitted key."
           },
-          "sessionId": { "type": "string" }
+          "sessionId": { "type": "string" },
+          "tenantId": { "type": "string" }
         }
       },
       "CaptchaVerification": {
@@ -444,6 +664,7 @@
           "email",
           "active",
           "createdAt",
+          "tenantId",
           "updatedAt"
         ],
         "properties": {
@@ -453,6 +674,7 @@
           "email": { "type": ["string", "null"], "format": "email" },
           "active": { "type": "boolean" },
           "createdAt": { "type": "string", "format": "date-time" },
+          "tenantId": { "type": "string" },
           "updatedAt": { "type": "string", "format": "date-time" }
         }
       },
@@ -469,6 +691,172 @@
                 "type": { "const": "accounts" },
                 "id": { "type": "string" },
                 "attributes": { "$ref": "#/components/schemas/Account" }
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": ["self"],
+            "properties": {
+              "self": { "type": "string" },
+              "next": { "type": "string" }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "required": ["page"],
+            "properties": {
+              "page": {
+                "type": "object",
+                "required": ["offset", "limit", "total"],
+                "properties": {
+                  "offset": { "type": "integer" },
+                  "limit": { "type": "integer" },
+                  "total": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Tenant": {
+        "type": "object",
+        "required": ["id", "name", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["active", "disabled"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateTenantInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "name": { "type": ["string", "null"] }
+        }
+      },
+      "PatchTenantInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["active", "disabled"] }
+        }
+      },
+      "TenantCollection": {
+        "type": "object",
+        "required": ["data", "links", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "id", "attributes"],
+              "properties": {
+                "type": { "const": "tenants" },
+                "id": { "type": "string" },
+                "attributes": { "$ref": "#/components/schemas/Tenant" }
+              }
+            }
+          },
+          "links": {
+            "type": "object",
+            "required": ["self"],
+            "properties": {
+              "self": { "type": "string" },
+              "next": { "type": "string" }
+            }
+          },
+          "meta": {
+            "type": "object",
+            "required": ["page"],
+            "properties": {
+              "page": {
+                "type": "object",
+                "required": ["offset", "limit", "total"],
+                "properties": {
+                  "offset": { "type": "integer" },
+                  "limit": { "type": "integer" },
+                  "total": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TenantApiKey": {
+        "type": "object",
+        "required": [
+          "createdAt",
+          "firstFour",
+          "id",
+          "name",
+          "tenantId",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": { "type": "string", "format": "date-time" },
+          "firstFour": { "type": "string" },
+          "id": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "tenantId": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreatedTenantApiKey": {
+        "type": "object",
+        "required": [
+          "createdAt",
+          "firstFour",
+          "id",
+          "key",
+          "name",
+          "tenantId",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": { "type": "string", "format": "date-time" },
+          "firstFour": { "type": "string" },
+          "id": { "type": "string" },
+          "key": { "type": "string", "writeOnly": true },
+          "name": { "type": ["string", "null"] },
+          "tenantId": { "type": "string" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateTenantApiKeyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "name": { "type": ["string", "null"] } }
+      },
+      "PatchTenantApiKeyInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": { "name": { "type": ["string", "null"] } }
+      },
+      "TenantApiKeyCollection": {
+        "type": "object",
+        "required": ["data", "links", "meta"],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "id", "attributes"],
+              "properties": {
+                "type": { "const": "tenant-api-keys" },
+                "id": { "type": "string" },
+                "attributes": {
+                  "$ref": "#/components/schemas/TenantApiKey"
+                }
               }
             }
           },
@@ -557,6 +945,56 @@
           },
           "application/json": {
             "schema": { "$ref": "#/components/schemas/AccountCollection" }
+          }
+        }
+      },
+      "Tenant": {
+        "description": "Tenant",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Tenant" }
+          }
+        }
+      },
+      "TenantCollection": {
+        "description": "JSON:API tenant collection",
+        "content": {
+          "application/vnd.api+json": {
+            "schema": { "$ref": "#/components/schemas/TenantCollection" }
+          },
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/TenantCollection" }
+          }
+        }
+      },
+      "TenantApiKey": {
+        "description": "Tenant API key metadata",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/TenantApiKey" }
+          }
+        }
+      },
+      "CreatedTenantApiKey": {
+        "description": "Created Tenant API key with one-time plaintext",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/CreatedTenantApiKey" }
+          }
+        }
+      },
+      "TenantApiKeyCollection": {
+        "description": "JSON:API Tenant API key collection",
+        "content": {
+          "application/vnd.api+json": {
+            "schema": {
+              "$ref": "#/components/schemas/TenantApiKeyCollection"
+            }
+          },
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/TenantApiKeyCollection"
+            }
           }
         }
       },

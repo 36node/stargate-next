@@ -1,8 +1,24 @@
 const CAPTCHA_TEST_CODE_PATTERN = /^[A-Z0-9]{4}$/;
 const NON_NEGATIVE_DECIMAL = /^(0|[1-9][0-9]*)$/;
+const DEPLOY_TIERS = [
+  "development",
+  "preview",
+  "production",
+  "test",
+  "uat",
+] as const;
+const CAPTCHA_TEST_ALLOWED_TIERS = new Set<DeployTier>([
+  "development",
+  "preview",
+  "test",
+  "uat",
+]);
+
+export type DeployTier = (typeof DEPLOY_TIERS)[number];
 
 export type StargateConfig = {
   accountCreateIdempotencyTtlSeconds: number;
+  adminApiKey: string;
   apiKey: string;
   captchaAttempts: number;
   captchaCreateLimit: number;
@@ -11,6 +27,7 @@ export type StargateConfig = {
   captchaTestCode?: string;
   captchaTtlSeconds: number;
   clockToleranceSeconds: number;
+  deployTier: DeployTier;
   jwtSecret: string;
   loginAttempts: number;
   loginLockSeconds: number;
@@ -18,6 +35,8 @@ export type StargateConfig = {
   redisKeyPrefix: string;
   refreshTtlSeconds: number;
   secondary?: { id: string; secret: string };
+  tenantApiKeyPrimary: { id: string; secret: string };
+  tenantApiKeySecondary?: { id: string; secret: string };
   testCaptcha: boolean;
   tokenTtlSeconds: number;
 };
@@ -28,6 +47,16 @@ function required(environment: NodeJS.ProcessEnv, name: string): string {
     throw new Error(`${name} must be configured`);
   }
   return value;
+}
+
+function deployTier(environment: NodeJS.ProcessEnv): DeployTier {
+  const value = environment.STARGATE_DEPLOY_TIER ?? "production";
+  if (!DEPLOY_TIERS.includes(value as DeployTier)) {
+    throw new Error(
+      "STARGATE_DEPLOY_TIER must be one of development, preview, production, test, or uat"
+    );
+  }
+  return value as DeployTier;
 }
 
 function positiveInteger(
@@ -103,9 +132,27 @@ export function loadStargateConfig(
   if (secondary && secondary.id === primary.id) {
     throw new Error("refresh HMAC key ids must be distinct");
   }
+  const tenantApiKeyPrimary = {
+    id: required(environment, "TENANT_API_KEY_HMAC_PRIMARY_KEY_ID"),
+    secret: required(environment, "TENANT_API_KEY_HMAC_PRIMARY_SECRET"),
+  };
+  const tenantApiKeySecondary = optionalPair(
+    environment,
+    "TENANT_API_KEY_HMAC_SECONDARY_KEY_ID",
+    "TENANT_API_KEY_HMAC_SECONDARY_SECRET"
+  );
+  if (
+    tenantApiKeySecondary &&
+    tenantApiKeySecondary.id === tenantApiKeyPrimary.id
+  ) {
+    throw new Error("tenant api key HMAC key ids must be distinct");
+  }
+  const selectedDeployTier = deployTier(environment);
   const testCaptcha = environment.CAPTCHA_TEST_MODE === "true";
-  if (testCaptcha && environment.NODE_ENV === "production") {
-    throw new Error("CAPTCHA_TEST_MODE cannot be enabled in production");
+  if (testCaptcha && !CAPTCHA_TEST_ALLOWED_TIERS.has(selectedDeployTier)) {
+    throw new Error(
+      "CAPTCHA_TEST_MODE requires a non-production STARGATE_DEPLOY_TIER"
+    );
   }
   const captchaTestCode = testCaptcha
     ? required(environment, "CAPTCHA_TEST_CODE").trim().toUpperCase()
@@ -115,8 +162,15 @@ export function loadStargateConfig(
       "CAPTCHA_TEST_CODE must contain exactly 4 ASCII letters or digits"
     );
   }
+  if (testCaptcha) {
+    console.warn(
+      `[stargate] CAPTCHA test mode is enabled for ${selectedDeployTier}`
+    );
+  }
   const captchaHmacSecret = required(environment, "CAPTCHA_HMAC_SECRET");
   const jwtSecret = required(environment, "STARGATE_JWT_SECRET");
+  const apiKey = required(environment, "STARGATE_API_KEY");
+  const adminApiKey = required(environment, "STARGATE_ADMIN_API_KEY");
   const tokenTtlSeconds = positiveInteger(
     environment,
     "ACCESS_TOKEN_TTL_SECONDS",
@@ -140,6 +194,18 @@ export function loadStargateConfig(
   if (secondary) {
     secrets.push(["REFRESH_KEY_HMAC_SECONDARY_SECRET", secondary.secret]);
   }
+  secrets.push([
+    "TENANT_API_KEY_HMAC_PRIMARY_SECRET",
+    tenantApiKeyPrimary.secret,
+  ]);
+  if (tenantApiKeySecondary) {
+    secrets.push([
+      "TENANT_API_KEY_HMAC_SECONDARY_SECRET",
+      tenantApiKeySecondary.secret,
+    ]);
+  }
+  secrets.push(["STARGATE_API_KEY", apiKey]);
+  secrets.push(["STARGATE_ADMIN_API_KEY", adminApiKey]);
   assertDistinctSecrets(secrets);
   return {
     accountCreateIdempotencyTtlSeconds: positiveInteger(
@@ -147,7 +213,8 @@ export function loadStargateConfig(
       "ACCOUNT_CREATE_IDEMPOTENCY_TTL_SECONDS",
       "3600"
     ),
-    apiKey: required(environment, "STARGATE_API_KEY"),
+    adminApiKey,
+    apiKey,
     captchaAttempts: positiveInteger(environment, "CAPTCHA_MAX_ATTEMPTS", "5"),
     captchaCreateLimit: positiveInteger(
       environment,
@@ -167,6 +234,7 @@ export function loadStargateConfig(
       "300"
     ),
     clockToleranceSeconds,
+    deployTier: selectedDeployTier,
     jwtSecret,
     loginAttempts: positiveInteger(environment, "LOGIN_MAX_ATTEMPTS", "5"),
     loginLockSeconds: positiveInteger(environment, "LOGIN_LOCK_SECONDS", "60"),
@@ -178,6 +246,8 @@ export function loadStargateConfig(
       "604800"
     ),
     secondary,
+    tenantApiKeyPrimary,
+    tenantApiKeySecondary,
     testCaptcha,
     tokenTtlSeconds,
   };

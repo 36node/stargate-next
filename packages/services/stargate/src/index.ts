@@ -6,6 +6,7 @@ export {
   verifyAuthorizationHeader,
 } from "./access-token";
 export {
+  type DeployTier,
   loadStargateConfig,
   type StargateConfig,
 } from "./config";
@@ -14,17 +15,30 @@ export type {
   AccountCollection,
   AccountInput,
   AccountPatchInput,
+  ActorType,
+  AdminScope,
   AuthTokens,
   Captcha,
+  CreatedTenantApiKey,
   HealthCheck,
   LoginInput,
   PublicAccount,
+  PublicTenant,
+  PublicTenantApiKey,
   RequestContext,
   Session,
   StargateErrorCategory,
   StargateErrorCode,
   StargateHealth,
   StargateServiceContract,
+  TenantApiKeyCollection,
+  TenantApiKeyInput,
+  TenantApiKeyPatchInput,
+  TenantCollection,
+  TenantInput,
+  TenantPatchInput,
+  TenantScope,
+  TenantStatus,
 } from "./contracts";
 export {
   StargateServiceError,

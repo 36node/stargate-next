@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/component: stargate-next
 data:
   NODE_ENV: {{ .Values.stargateNext.config.nodeEnv | quote }}
+  STARGATE_DEPLOY_TIER: {{ .Values.stargateNext.config.deployTier | quote }}
   PORT: "9527"
   LOG_LEVEL: {{ .Values.stargateNext.config.logLevel | quote }}
   REDIS_KEY_PREFIX: {{ .Values.stargateNext.config.redisKeyPrefix | quote }}

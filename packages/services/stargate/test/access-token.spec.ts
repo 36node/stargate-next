@@ -44,6 +44,7 @@ function validPayload(overrides: Record<string, unknown> = {}) {
     iat: NOW_SECONDS,
     sid: "session-1",
     sub: "account-1",
+    tid: "tenant-1",
     type: "access",
     ...overrides,
   };
@@ -92,6 +93,7 @@ describe("access token", () => {
       now: NOW,
       secret: SECRET,
       sessionId: "session-1",
+      tenantId: "tenant-1",
       ttlSeconds: 3600,
     });
     const [header, payload] = signed.token.split(".");
@@ -109,6 +111,7 @@ describe("access token", () => {
       "iat",
       "sid",
       "sub",
+      "tid",
       "type",
     ]);
     expect(decodedPayload.type).toBe("access");
@@ -124,7 +127,26 @@ describe("access token", () => {
         now: NOW,
         secret: SECRET,
       })
-    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "tenant-1",
+    });
+  });
+
+  it("accepts legacy five-claim tokens only as the default tenant", () => {
+    const { tid: _tid, ...legacyPayload } = validPayload();
+    expect(
+      verifyAccessToken(mintToken(legacyPayload), {
+        clockToleranceSeconds: 30,
+        now: NOW,
+        secret: SECRET,
+      })
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "default",
+    });
   });
 
   it("rejects malformed compact serializations", () => {
@@ -271,13 +293,21 @@ describe("access token", () => {
         }),
         30
       )
-    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "tenant-1",
+    });
     expect(
       verify(
         validPayload({ exp: NOW_SECONDS - 29, iat: NOW_SECONDS - 100 }),
         30
       )
-    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "tenant-1",
+    });
     expect(() =>
       verify(
         validPayload({ exp: NOW_SECONDS - 30, iat: NOW_SECONDS - 100 }),
@@ -287,10 +317,18 @@ describe("access token", () => {
 
     expect(
       verify(validPayload({ exp: NOW_SECONDS + 2, iat: NOW_SECONDS + 1 }), 0)
-    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "tenant-1",
+    });
     expect(
       verify(validPayload({ exp: NOW_SECONDS + 1, iat: NOW_SECONDS - 100 }), 0)
-    ).toEqual({ accountId: "account-1", sessionId: "session-1" });
+    ).toEqual({
+      accountId: "account-1",
+      sessionId: "session-1",
+      tenantId: "tenant-1",
+    });
     expect(() =>
       verify(validPayload({ exp: NOW_SECONDS, iat: NOW_SECONDS - 100 }), 0)
     ).toThrow(ACCESS_TOKEN_INVALID_MESSAGE);

@@ -1,7 +1,13 @@
+/**
+ * 把旧版 MD5 账号 fixture 幂等写入内置 default Tenant。
+ */
+
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { db } from "@repo/db";
+
+import { seedDefaultTenant } from "./seed-default-tenant";
 
 type LegacyFixture = {
   id: string;
@@ -11,6 +17,7 @@ type LegacyFixture = {
 };
 
 async function main() {
+  await seedDefaultTenant();
   const fixturePath = resolve(
     process.env.STARGATE_LEGACY_FIXTURE ??
       "../../../apps/stargate-next/test/fixtures/legacy-md5.json"
@@ -28,6 +35,7 @@ async function main() {
           passwordChangedAt: now,
           passwordHash: fixture.passwordHash,
           status: "active",
+          tenantId: "default",
           username: fixture.username,
         },
         update: {
@@ -37,7 +45,12 @@ async function main() {
           passwordHash: fixture.passwordHash,
           status: "active",
         },
-        where: { username: fixture.username },
+        where: {
+          tenantId_username: {
+            tenantId: "default",
+            username: fixture.username,
+          },
+        },
       })
     )
   );

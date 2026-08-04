@@ -6,15 +6,24 @@ import {
   nextSessionCookieNames,
   resolveClockTolerance,
   resolveSessionCookieNames,
+  resolveTenantId,
 } from "./auth-config";
 
 describe("auth config", () => {
   it("defaults missing backend to the isolated Stargate Next cookies", () => {
     expect(resolveSessionCookieNames(undefined)).toEqual({
       refresh: "s-next-refresh",
+      tenant: "s-next-tenant",
       token: "s-next-token",
     });
     expect(resolveSessionCookieNames("next")).toBe(nextSessionCookieNames);
+  });
+
+  it("allows only configured Next tenant choices", () => {
+    expect(resolveTenantId("test")).toBe("test");
+    expect(resolveTenantId("default")).toBe("default");
+    expect(resolveTenantId("unknown")).toBe("default");
+    expect(resolveTenantId(undefined)).toBe("default");
   });
 
   it("switches both cookie names together for legacy backends", () => {

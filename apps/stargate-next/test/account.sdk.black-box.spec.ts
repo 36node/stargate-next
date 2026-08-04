@@ -1,9 +1,6 @@
+import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
-import {
-  StargateApiError,
-  StargateNextClient,
-} from "../../../packages/stargate-next-sdk/src";
 import { env, uniqueUsername } from "./support/black-box";
 
 async function expectApiError(

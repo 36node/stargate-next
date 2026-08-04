@@ -12,6 +12,7 @@ export const CookieOptions = {
 
 export type SessionCookieNames = {
   refresh: string;
+  tenant?: string;
   token: string;
 };
 
@@ -39,6 +40,26 @@ async function getSessionTokenFromCookie(cookieName = TokenCookieKey) {
 
 async function getRefreshTokenFromCookie(cookieName = RefreshTokenCookieKey) {
   return (await cookies()).get(cookieName)?.value;
+}
+
+async function getTenantFromCookie(cookieName?: string) {
+  return cookieName ? (await cookies()).get(cookieName)?.value : undefined;
+}
+
+async function setTenantCookie(
+  tenantId: string,
+  expireAt: Date,
+  secure?: boolean,
+  cookieName?: string
+): Promise<void> {
+  if (!cookieName) {
+    return;
+  }
+  (await cookies()).set(cookieName, tenantId, {
+    secure,
+    expires: expireAt,
+    ...CookieOptions,
+  });
 }
 
 async function setRefreshTokenCookie(
@@ -81,12 +102,22 @@ async function setSessionCookies(
     secure,
     cookieNames.refresh
   );
+  if (session.tenantId) {
+    await setTenantCookie(
+      session.tenantId,
+      keepalive ? session.expireAt : session.tokenExpireAt,
+      secure,
+      cookieNames.tenant
+    );
+  }
 }
 
 export {
   setSessionTokenCookie,
   getSessionTokenFromCookie,
   getRefreshTokenFromCookie,
+  getTenantFromCookie,
   clearSessionCookies,
   setSessionCookies,
+  setTenantCookie,
 };

@@ -16,6 +16,7 @@ let usernameSequence = 0;
 
 const config: StargateConfig = {
   accountCreateIdempotencyTtlSeconds: 3600,
+  adminApiKey: "itest-admin-api-key",
   apiKey: "itest-api-key",
   captchaAttempts: 5,
   captchaCreateLimit: 30,
@@ -23,6 +24,7 @@ const config: StargateConfig = {
   captchaHmacSecret: "itest-captcha-secret",
   captchaTtlSeconds: 300,
   clockToleranceSeconds: 30,
+  deployTier: "test",
   jwtSecret: "itest-jwt-secret",
   loginAttempts: 5,
   loginLockSeconds: 60,
@@ -30,10 +32,15 @@ const config: StargateConfig = {
   redisKeyPrefix: `${prefix}:`,
   refreshTtlSeconds: 604_800,
   testCaptcha: false,
+  tenantApiKeyPrimary: {
+    id: "itest-tenant-k1",
+    secret: "itest-tenant-s1",
+  },
   tokenTtlSeconds: 3600,
 };
 
 const service = createStargateService(config);
+const defaultScope = service.resolveApiCredential(config.apiKey, undefined);
 
 function context(operation: string): RequestContext {
   return { requestId: `${prefix}-${operation}` };
@@ -52,7 +59,11 @@ async function createAccount(input: AccountInput, operation: string) {
   if (input.idempotencyKey) {
     idempotencyKeys.add(input.idempotencyKey);
   }
-  const account = await service.createAccount(input, context(operation));
+  const account = await service.createAccount(
+    await defaultScope,
+    input,
+    context(operation)
+  );
   accountIds.add(account.id);
   return account;
 }
@@ -66,6 +77,7 @@ async function seedSession(accountId: string, label: string) {
       expiresAt: new Date(Date.now() + 3_600_000),
       refreshKeyHash,
       refreshKeyHmacKeyId: config.primary.id,
+      tenantId: "default",
     },
   });
   return { refreshKey, refreshKeyHash };
@@ -131,6 +143,7 @@ describe("Account service integration", () => {
     await seedSession(account.id, "password-change");
 
     await service.changePassword(
+      await defaultScope,
       account.id,
       newPassword,
       context("password-change")
@@ -164,11 +177,13 @@ describe("Account service integration", () => {
       "audit"
     );
     await service.patchAccount(
+      await defaultScope,
       account.id,
       { active: false },
       context("audit-update")
     );
     await service.changePassword(
+      await defaultScope,
       account.id,
       "audit-next-password",
       context("audit-password")
@@ -176,7 +191,11 @@ describe("Account service integration", () => {
     const stored = await db.account.findUniqueOrThrow({
       where: { id: account.id },
     });
-    await service.deleteAccount(account.id, context("audit-delete"));
+    await service.deleteAccount(
+      await defaultScope,
+      account.id,
+      context("audit-delete")
+    );
 
     const expected = [
       ["account.create", "audit-create"],
@@ -223,12 +242,23 @@ describe("Account service integration", () => {
       "soft-delete-create"
     );
     await seedSession(account.id, "soft-delete");
-    await service.deleteAccount(account.id, context("soft-delete"));
-    await service.deleteAccount(account.id, context("soft-delete-repeat"));
     await service.deleteAccount(
-      `${prefix}-missing-account`,
-      context("soft-delete-missing")
+      await defaultScope,
+      account.id,
+      context("soft-delete")
     );
+    await service.deleteAccount(
+      await defaultScope,
+      account.id,
+      context("soft-delete-repeat")
+    );
+    await expect(
+      service.deleteAccount(
+        await defaultScope,
+        `${prefix}-missing-account`,
+        context("soft-delete-missing")
+      )
+    ).rejects.toMatchObject({ code: "ACCOUNT_NOT_FOUND" });
     const stored = await db.account.findUniqueOrThrow({
       where: { id: account.id },
     });
@@ -277,7 +307,11 @@ describe("Account service integration", () => {
       "placeholder-blocker"
     );
     await expect(
-      service.deleteAccount(victim.id, context("placeholder-delete"))
+      service.deleteAccount(
+        await defaultScope,
+        victim.id,
+        context("placeholder-delete")
+      )
     ).resolves.toBeUndefined();
     const [storedVictim, storedBlocker] = await Promise.all([
       db.account.findUniqueOrThrow({ where: { id: victim.id } }),
@@ -297,11 +331,11 @@ describe("Account service integration", () => {
     const input = { idempotencyKey: key, password, username };
     const first = await createAccount(input, "fingerprint-create");
     const firstRecord = await db.accountCreateIdempotency.findUniqueOrThrow({
-      where: { key },
+      where: { tenantId_key: { key, tenantId: "default" } },
     });
     const replay = await createAccount(input, "fingerprint-replay");
     const replayRecord = await db.accountCreateIdempotency.findUniqueOrThrow({
-      where: { key },
+      where: { tenantId_key: { key, tenantId: "default" } },
     });
     expect(replay.id).toBe(first.id);
     expect(firstRecord.requestHash).toMatch(REQUEST_HASH_PATTERN);
@@ -309,6 +343,7 @@ describe("Account service integration", () => {
     expect(replayRecord.requestHash).toBe(firstRecord.requestHash);
     await expect(
       service.createAccount(
+        await defaultScope,
         { ...input, password: "different-idempotency-password" },
         context("fingerprint-conflict")
       )
@@ -327,7 +362,7 @@ describe("Account service integration", () => {
     );
     await db.accountCreateIdempotency.update({
       data: { expiresAt: new Date("2020-01-01T00:00:00.000Z") },
-      where: { key },
+      where: { tenantId_key: { key, tenantId: "default" } },
     });
     const second = await createAccount(
       {
@@ -350,6 +385,7 @@ describe("Account service integration", () => {
       seedSession(account.id, "disable-2"),
     ]);
     await service.patchAccount(
+      await defaultScope,
       account.id,
       { active: false },
       context("disable-account")
@@ -375,6 +411,7 @@ describe("Account service integration", () => {
     await seedSession(victim.id, "atomic");
     await expect(
       service.patchAccount(
+        await defaultScope,
         victim.id,
         { active: false, username: blocker.username },
         context("atomic-conflict")
@@ -395,6 +432,7 @@ describe("Account service integration", () => {
       idempotencyKeys.add(key);
       const results = await Promise.allSettled([
         service.createAccount(
+          await defaultScope,
           {
             active: true,
             email: `${username}@example.com`,
@@ -406,6 +444,7 @@ describe("Account service integration", () => {
           context(`concurrent-a-${round}`)
         ),
         service.createAccount(
+          await defaultScope,
           {
             active: true,
             email: `${username}@example.com`,
@@ -441,7 +480,7 @@ describe("Account service integration", () => {
       accountIds.add(successfulAccount.id);
       expect(await db.account.count({ where: { username } })).toBe(1);
       const record = await db.accountCreateIdempotency.findUniqueOrThrow({
-        where: { key },
+        where: { tenantId_key: { key, tenantId: "default" } },
       });
       expect(record.accountId).toBe(successfulAccount.id);
     }

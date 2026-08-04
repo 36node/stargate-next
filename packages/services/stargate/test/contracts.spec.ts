@@ -29,8 +29,12 @@ const environment = {
   CAPTCHA_HMAC_SECRET: "captcha-secret",
   REFRESH_KEY_HMAC_PRIMARY_KEY_ID: "primary",
   REFRESH_KEY_HMAC_PRIMARY_SECRET: "primary-secret",
+  STARGATE_ADMIN_API_KEY: "admin-api-key",
   STARGATE_API_KEY: "api-key",
+  STARGATE_DEPLOY_TIER: "test",
   STARGATE_JWT_SECRET: "jwt-secret",
+  TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "tenant-primary",
+  TENANT_API_KEY_HMAC_PRIMARY_SECRET: "tenant-primary-secret",
 };
 
 describe("stargate service contracts", () => {

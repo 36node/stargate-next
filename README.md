@@ -39,7 +39,7 @@ pnpm db:migrate
 pnpm --filter stargate-next dev
 ```
 
-复制 `apps/stargate-next/env.example` 到根 `.env` 后填入独立密钥。除数据库与 Redis 地址外，`STARGATE_API_KEY`、`STARGATE_JWT_SECRET`、`CAPTCHA_HMAC_SECRET` 和 refresh HMAC primary 配置均为必填；secondary key 用于无停机轮换，必须同时提供 ID 和 secret。
+复制 `apps/stargate-next/env.example` 到根 `.env` 后填入独立密钥。除数据库与 Redis 地址外，Admin/Service API Key、JWT、Captcha HMAC、Refresh HMAC primary 和 Tenant API Key HMAC primary 均为必填且所有 secret 必须两两不同；secondary key 用于无停机轮换，必须同时提供 ID 和 secret。`STARGATE_DEPLOY_TIER` 与 `NODE_ENV` 独立，只有非 production tier 才允许 Captcha 测试模式。
 
 ```dotenv
 DATABASE_URL=postgresql://postgres:123456@localhost:5432/stargate-next-local?schema=public
@@ -68,9 +68,13 @@ pnpm seed
 ```bash
 DATABASE_URL=postgresql://postgres:123456@localhost:5432/stargate-next-blackbox pnpm db:migrate
 PORT=9530 STARGATE_ENDPOINT=http://127.0.0.1:9530 \
-STARGATE_API_KEY=local-service-api-key STARGATE_JWT_SECRET=local-jwt-secret CAPTCHA_HMAC_SECRET=local-captcha-hmac-secret \
+STARGATE_ADMIN_API_KEY=local-admin-api-key STARGATE_API_KEY=local-service-api-key \
+STARGATE_JWT_SECRET=local-jwt-secret CAPTCHA_HMAC_SECRET=local-captcha-hmac-secret \
 REFRESH_KEY_HMAC_PRIMARY_KEY_ID=primary-2026 \
 REFRESH_KEY_HMAC_PRIMARY_SECRET=local-refresh-primary-secret \
+TENANT_API_KEY_HMAC_PRIMARY_KEY_ID=tenant-primary-2026 \
+TENANT_API_KEY_HMAC_PRIMARY_SECRET=local-tenant-key-primary-secret \
+STARGATE_DEPLOY_TIER=development \
 CAPTCHA_TEST_MODE=true CAPTCHA_TEST_CODE=ABCD \
 REDIS_KEY_PREFIX=stargate-next:blackbox: \
 pnpm --filter stargate-next dev

@@ -46,10 +46,22 @@ describe("playground proxy", () => {
     expect(response.cookies.get("s-next-refresh")?.value).toBe("refresh-new");
   });
 
+  it("carries a backfilled default tenant cookie to the protected response", async () => {
+    mocks.loadSession.mockImplementation((sourceResponse: NextResponse) => {
+      sourceResponse.cookies.set("s-next-tenant", "default");
+      return Promise.resolve({ id: "legacy-session", tenantId: "default" });
+    });
+
+    const response = await proxy(request("/dashboard"));
+    expect(response.status).toBe(200);
+    expect(response.cookies.get("s-next-tenant")?.value).toBe("default");
+  });
+
   it("redirects and returns exactly one deletion for each session cookie", async () => {
     mocks.loadSession.mockImplementation((sourceResponse: NextResponse) => {
       sourceResponse.cookies.delete("s-next-token");
       sourceResponse.cookies.delete("s-next-refresh");
+      sourceResponse.cookies.set("s-next-tenant", "default");
       return Promise.resolve();
     });
 
@@ -60,10 +72,15 @@ describe("playground proxy", () => {
     );
     expect(cookieNames(response).sort()).toEqual([
       "s-next-refresh",
+      "s-next-tenant",
       "s-next-token",
     ]);
     for (const header of response.headers.getSetCookie()) {
-      expect(hasCookieDeletionSemantics(header)).toBe(true);
+      if (header.startsWith("s-next-tenant=")) {
+        expect(hasCookieDeletionSemantics(header)).toBe(false);
+      } else {
+        expect(hasCookieDeletionSemantics(header)).toBe(true);
+      }
     }
   });
 

@@ -107,7 +107,12 @@ jobs:
         run: |
           pnpm db:migrate
           pnpm db:migrate
+          pnpm --filter stargate-next seed:default-tenant
           pnpm --filter stargate-next seed:legacy-fixture
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+      - name: Verify multi-tenant backfill migration
+        run: pnpm --filter @repo/db verify:backfill
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
       - name: Code check
@@ -116,6 +121,8 @@ jobs:
         run: |
           ! rg -n '@repo/(db|redis)' apps/stargate-next --glob '*.ts'
           ! rg -n '@(repo/db|repo/redis|prisma|nestjs)/' packages/services/stargate/src/contracts.ts
+          ! rg -n 'as unknown as TenantScope|as TenantScope' --glob '*.ts' | rg -v '^packages/services/stargate/src/service\.ts:'
+          ! rg -n 'as unknown as AdminScope|as AdminScope' --glob '*.ts' | rg -v '^packages/services/stargate/src/service\.ts:'
       - name: Verify OpenAPI SDK snapshot
         run: |
           pnpm sdk:generate
@@ -158,6 +165,8 @@ jobs:
           CAPTCHA_TEST_MODE: "true"
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
           NODE_ENV: test
+          STARGATE_ADMIN_API_KEY: ci-admin-api-key
+          STARGATE_DEPLOY_TIER: test
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379
           REDIS_KEY_PREFIX: "stargate-next:ci-${{ github.run_id }}:"
@@ -165,6 +174,8 @@ jobs:
           REFRESH_KEY_HMAC_PRIMARY_SECRET: ci-primary-secret
           STARGATE_API_KEY: ci-service-api-key
           STARGATE_ENDPOINT: http://127.0.0.1:9527
+          TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: ci-tenant-key-primary
+          TENANT_API_KEY_HMAC_PRIMARY_SECRET: ci-tenant-key-primary-secret
 
       - name: Build application artifacts
         if: github.actor != 'dependabot[bot]'
@@ -643,15 +654,24 @@ jobs:
             fail "Deploy task $task_id finished with status: ${status:-unknown}"
           fi
 
-      - name: Seed init account
+      - name: Seed tenants and init accounts
         if: ${{ steps.deploy.outputs.outcome == 'success' }}
         run: |
           set -euo pipefail
 
-          if [ -z "$STARGATE_API_KEY" ]; then
-            echo "::error::STARGATE_API_KEY secret is required for seed"
-            exit 1
-          fi
+          require_secret() {
+            name="$1"
+            value="$2"
+            if [ -z "$value" ]; then
+              echo "::error::$name is required for seed"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+          }
+
+          require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
+          require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
+          require_secret SEED_PASSWORD "$SEED_PASSWORD"
 
           API_URL="${{ steps.deploy-context.outputs.api_url }}"
           echo "Waiting for API to be ready at $API_URL/health/ready"
@@ -667,25 +687,300 @@ jobs:
             exit 1
           fi
 
-          echo "Creating init account (username=stargate)..."
-          suffix="$(date +%s)"
-          http_code="$(curl -sS -o /tmp/seed-response.json -w '%{http_code}' \
-            -X POST "$API_URL/v1/accounts" \
-            -H "x-api-key: $STARGATE_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"idempotencyKey\":\"seed-stargate-${suffix}\",\"password\":\"stargate@36node\",\"username\":\"stargate\"}")"
+          ensure_tenant() {
+            response_file="$(mktemp)"
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/tenants" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"id":"test","name":"test"}')"
+            if [ "$status" = "201" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$status" != "409" ] || [ "$(jq -r '.code // empty' "$response_file")" != "TENANT_ALREADY_EXISTS" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Ensure test tenant failed with HTTP $status"
+              exit 1
+            fi
 
-          if [ "$http_code" = "201" ] || [ "$http_code" = "200" ]; then
-            echo "Init account created (HTTP $http_code)"
-          elif [ "$http_code" = "409" ]; then
-            echo "Init account already exists, skipping (HTTP $http_code)"
-          else
-            cat /tmp/seed-response.json
-            echo "::error::Create account failed with HTTP $http_code"
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              "$API_URL/v1/tenants/test" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY")"
+            if [ "$status" != "200" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Read test tenant failed with HTTP $status"
+              exit 1
+            fi
+            tenant_status="$(jq -r '.status // empty' "$response_file")"
+            if [ "$tenant_status" = "active" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$tenant_status" != "disabled" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Unexpected test tenant status: $tenant_status"
+              exit 1
+            fi
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X PATCH "$API_URL/v1/tenants/test" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"status":"active"}')"
+            if [ "$status" != "200" ] || [ "$(jq -r '.status // empty' "$response_file")" != "active" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Enable test tenant failed with HTTP $status"
+              exit 1
+            fi
+            rm -f "$response_file"
+          }
+
+          ensure_account() {
+            tenant="$1"
+            key="$2"
+            include_tenant_header="$3"
+            response_file="$(mktemp)"
+            tenant_args=()
+            if [ "$include_tenant_header" = "true" ]; then
+              tenant_args=(-H "x-tenant-id: $tenant")
+            fi
+            payload="$(jq -cn --arg password "$SEED_PASSWORD" '{active:true,password:$password,username:"stargate"}')"
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/accounts" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d "$payload")"
+            if [ "$status" = "201" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$status" != "409" ] || [ "$(jq -r '.code // empty' "$response_file")" != "ACCOUNT_IDENTIFIER_CONFLICT" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Ensure $tenant account failed with HTTP $status"
+              exit 1
+            fi
+
+            account_id=""
+            for page in $(seq 0 19); do
+              offset="$((page * 100))"
+              status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+                "$API_URL/v1/accounts?page[offset]=$offset&page[limit]=100" \
+                -H "x-api-key: $key" \
+                "${tenant_args[@]}")"
+              if [ "$status" != "200" ]; then
+                cat "$response_file"
+                rm -f "$response_file"
+                echo "::error::List $tenant accounts failed with HTTP $status"
+                exit 1
+              fi
+              account_id="$(jq -r '.data[] | select(.attributes.username == "stargate") | .id' "$response_file" | head -n 1)"
+              [ -n "$account_id" ] && break
+              [ "$(jq -r '.links.next // empty' "$response_file")" = "" ] && break
+            done
+            if [ -z "$account_id" ]; then
+              rm -f "$response_file"
+              echo "::error::Existing stargate account was not found in $tenant"
+              exit 1
+            fi
+
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X PATCH "$API_URL/v1/accounts/$account_id" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d '{"active":true}')"
+            if [ "$status" != "200" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Enable $tenant account failed with HTTP $status"
+              exit 1
+            fi
+            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/accounts/$account_id/password" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -cn --arg password "$SEED_PASSWORD" '{password:$password}')")"
+            if [ "$status" != "204" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Reset $tenant account password failed with HTTP $status"
+              exit 1
+            fi
+            rm -f "$response_file"
+          }
+
+          ensure_tenant
+          ensure_account default "$STARGATE_API_KEY" false
+          ensure_account test "$STARGATE_ADMIN_API_KEY" true
+          echo "Default and test tenant accounts converged"
+        env:
+          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
+          STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
+          STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
+
+      - name: "Preview smoke: dual tenant"
+        if: ${{ steps.deploy.outputs.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+
+          require_value() {
+            local name="$1"
+            local value="$2"
+            if [ -z "$value" ]; then
+              if [ "$name" = "CAPTCHA_TEST_CODE" ]; then
+                echo "::error::CAPTCHA_TEST_CODE is required. Preview/UAT must configure STARGATE_DEPLOY_TIER + CAPTCHA_TEST_MODE + CAPTCHA_TEST_CODE, and store the same value in GitHub secret PREVIEW_CAPTCHA_TEST_CODE"
+              else
+                echo "::error::$name is required for Preview dual-tenant smoke"
+              fi
+              exit 1
+            fi
+          }
+
+          require_value API_URL "$API_URL"
+          # Admin Key 由前置 seed 使用；此处保留检查以确认 workflow 与 Pod Secret 已就绪。
+          require_value STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
+          require_value SEED_PASSWORD "$SEED_PASSWORD"
+          require_value CAPTCHA_TEST_CODE "$CAPTCHA_TEST_CODE"
+          echo "::add-mask::$STARGATE_ADMIN_API_KEY"
+          echo "::add-mask::$SEED_PASSWORD"
+          echo "::add-mask::$CAPTCHA_TEST_CODE"
+
+          if ! curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
+            echo "::error::Preview API readiness check failed"
             exit 1
           fi
+
+          captcha_response="$(mktemp)"
+          login_response="$(mktemp)"
+          refresh_response="$(mktemp)"
+          isolation_response="$(mktemp)"
+          trap 'rm -f "$captcha_response" "$login_response" "$refresh_response" "$isolation_response"' EXIT
+
+          fail_response() {
+            local context="$1"
+            local status="$2"
+            local response_file="$3"
+            local code
+            code="$(jq -r '.code // empty' "$response_file" 2>/dev/null || true)"
+            echo "::error::$context failed with HTTP $status${code:+ code=$code}"
+            exit 1
+          }
+
+          decode_token_tid() {
+            local token="$1"
+            local encoded
+            encoded="${token#*.}"
+            encoded="${encoded%%.*}"
+            case "$((${#encoded} % 4))" in
+              0) ;;
+              2) encoded="${encoded}==" ;;
+              3) encoded="${encoded}=" ;;
+              *) return 1 ;;
+            esac
+            printf '%s' "$encoded" | tr '_-' '/+' | base64 --decode 2>/dev/null | jq -r '.tid // empty' 2>/dev/null
+          }
+
+          login_tenant() {
+            local tenant="$1"
+            local captcha_status
+            local login_status
+            local captcha_id
+            local account_id
+            local access_token
+            local login_payload
+            local refresh_key
+            local token_tid
+
+            if [ "$tenant" = "test" ]; then
+              captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
+            else
+              captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas")"
+            fi
+            if [ "$captcha_status" != "201" ]; then
+              fail_response "Create $tenant captcha" "$captcha_status" "$captcha_response"
+            fi
+            captcha_id="$(jq -r '.id // empty' "$captcha_response")"
+            if [ -z "$captcha_id" ]; then
+              echo "::error::Create $tenant captcha returned no id"
+              exit 1
+            fi
+
+            login_payload="$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')"
+            if [ "$tenant" = "test" ]; then
+              login_status="$(curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$login_payload")"
+            else
+              login_status="$(curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$login_payload")"
+            fi
+            if [ "$login_status" != "200" ]; then
+              fail_response "Login $tenant account" "$login_status" "$login_response"
+            fi
+
+            account_id="$(jq -r '.accountId // empty' "$login_response")"
+            access_token="$(jq -r '.accessToken // empty' "$login_response")"
+            refresh_key="$(jq -r '.refreshKey // empty' "$login_response")"
+            if [ -z "$account_id" ] || [ -z "$access_token" ] || [ -z "$refresh_key" ]; then
+              echo "::error::Login $tenant account returned an incomplete token set"
+              exit 1
+            fi
+            echo "::add-mask::$access_token"
+            echo "::add-mask::$refresh_key"
+            token_tid="$(decode_token_tid "$access_token" || true)"
+            if [ "$token_tid" != "$tenant" ]; then
+              echo "::error::Login $tenant account returned an unexpected JWT tenant claim"
+              exit 1
+            fi
+
+            if [ "$tenant" = "default" ]; then
+              default_account_id="$account_id"
+              default_refresh_key="$refresh_key"
+            else
+              test_account_id="$account_id"
+            fi
+          }
+
+          default_account_id=""
+          default_refresh_key=""
+          test_account_id=""
+          login_tenant default
+          login_tenant test
+
+          if [ "$default_account_id" = "$test_account_id" ]; then
+            echo "::error::Default and test tenant logins resolved to the same account"
+            exit 1
+          fi
+
+          refresh_status="$(curl -sS -o "$refresh_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/refresh" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$(jq -cn --arg refreshKey "$default_refresh_key" '{refreshKey:$refreshKey}')")"
+          if [ "$refresh_status" != "401" ] || [ "$(jq -r '.code // empty' "$refresh_response")" != "REFRESH_INVALID" ]; then
+            fail_response "Cross-tenant refresh rejection" "$refresh_status" "$refresh_response"
+          fi
+
+          captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
+          if [ "$captcha_status" != "201" ]; then
+            fail_response "Create fresh test captcha" "$captcha_status" "$captcha_response"
+          fi
+          test_captcha_id="$(jq -r '.id // empty' "$captcha_response")"
+          if [ -z "$test_captcha_id" ]; then
+            echo "::error::Fresh test captcha returned no id"
+            exit 1
+          fi
+          isolation_status="$(curl -sS -o "$isolation_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$test_captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')")"
+          if [ "$isolation_status" != "401" ]; then
+            fail_response "Cross-tenant captcha rejection" "$isolation_status" "$isolation_response"
+          fi
+
+          echo "Preview dual-tenant smoke passed"
         env:
-          STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
+          API_URL: ${{ steps.deploy-context.outputs.api_url }}
+          STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
+          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
+          CAPTCHA_TEST_CODE: ${{ secrets.PREVIEW_CAPTCHA_TEST_CODE }}
 
       - name: Comment PR deploy URLs
         if: github.event_name == 'pull_request'

@@ -15,6 +15,7 @@ let sequence = 0;
 
 const config: StargateConfig = {
   accountCreateIdempotencyTtlSeconds: 3600,
+  adminApiKey: "auth-itest-admin-api-key",
   apiKey: "auth-itest-api-key",
   captchaAttempts: 5,
   captchaCreateLimit: 30,
@@ -23,6 +24,7 @@ const config: StargateConfig = {
   captchaTestCode: "ABCD",
   captchaTtlSeconds: 300,
   clockToleranceSeconds: 30,
+  deployTier: "test",
   jwtSecret: "auth-itest-jwt-secret",
   loginAttempts: 5,
   loginLockSeconds: 60,
@@ -34,10 +36,15 @@ const config: StargateConfig = {
     secret: "auth-itest-secondary-secret",
   },
   testCaptcha: true,
+  tenantApiKeyPrimary: {
+    id: "auth-itest-tenant-primary",
+    secret: "auth-itest-tenant-primary-secret",
+  },
   tokenTtlSeconds: 3600,
 };
 
 const service = createStargateService(config);
+const defaultScope = service.resolveApiCredential(config.apiKey, undefined);
 
 function context(operation: string): RequestContext {
   return {
@@ -62,6 +69,7 @@ async function createAccount(
 ) {
   const identity = nextIdentity();
   const account = await service.createAccount(
+    await defaultScope,
     { ...identity, password, ...overrides },
     context(`account-${sequence}`)
   );
@@ -70,7 +78,7 @@ async function createAccount(
 }
 
 function captcha(ip: string) {
-  return service.createCaptcha({
+  return service.createCaptcha(undefined, {
     ip,
     requestId: `${prefix}-captcha-${sequence}`,
   });
@@ -84,6 +92,7 @@ async function login(
   const requestContext = context(operation);
   const challenge = await captcha(requestContext.ip as string);
   return service.login(
+    undefined,
     {
       captchaCode: "ABCD",
       captchaId: challenge.id,
@@ -104,7 +113,7 @@ async function rejected(promise: Promise<unknown>) {
 }
 
 function redisKey(category: string, suffix: string) {
-  return `${config.redisKeyPrefix}${category}:${suffix}`;
+  return `${config.redisKeyPrefix}${category}:default:${suffix}`;
 }
 
 async function waitUntilExpired(key: string): Promise<void> {
@@ -159,31 +168,35 @@ describe("authentication service integration", () => {
   it("keeps captcha verification atomic, bounded, and expiry-aware", async () => {
     const ip = "198.51.100.21";
     const once = await captcha(ip);
-    await expect(service.verifyCaptcha(once.id, "ABCD")).resolves.toBe(true);
-    await expect(service.verifyCaptcha(once.id, "ABCD")).resolves.toBe(false);
+    await expect(
+      service.verifyCaptcha(undefined, once.id, "ABCD")
+    ).resolves.toBe(true);
+    await expect(
+      service.verifyCaptcha(undefined, once.id, "ABCD")
+    ).resolves.toBe(false);
 
     const concurrent = await captcha(ip);
     const results = await Promise.all(
       Array.from({ length: 8 }, () =>
-        service.verifyCaptcha(concurrent.id, "ABCD")
+        service.verifyCaptcha(undefined, concurrent.id, "ABCD")
       )
     );
     expect(results.filter(Boolean)).toHaveLength(1);
 
     const exhausted = await captcha(ip);
     for (let attempt = 0; attempt < config.captchaAttempts; attempt += 1) {
-      await expect(service.verifyCaptcha(exhausted.id, "WXYZ")).resolves.toBe(
-        false
-      );
+      await expect(
+        service.verifyCaptcha(undefined, exhausted.id, "WXYZ")
+      ).resolves.toBe(false);
     }
-    await expect(service.verifyCaptcha(exhausted.id, "ABCD")).resolves.toBe(
-      false
-    );
+    await expect(
+      service.verifyCaptcha(undefined, exhausted.id, "ABCD")
+    ).resolves.toBe(false);
 
     const stableTtl = await captcha(ip);
     const stableKey = redisKey("captcha", stableTtl.id);
     const before = await getRedisClient().pttl(stableKey);
-    await service.verifyCaptcha(stableTtl.id, "WXYZ");
+    await service.verifyCaptcha(undefined, stableTtl.id, "WXYZ");
     const after = await getRedisClient().pttl(stableKey);
     expect(after).toBeGreaterThan(0);
     expect(after).toBeLessThanOrEqual(before);
@@ -192,9 +205,9 @@ describe("authentication service integration", () => {
     const expiringKey = redisKey("captcha", expiring.id);
     await getRedisClient().expire(expiringKey, 1);
     await waitUntilExpired(expiringKey);
-    await expect(service.verifyCaptcha(expiring.id, "ABCD")).resolves.toBe(
-      false
-    );
+    await expect(
+      service.verifyCaptcha(undefined, expiring.id, "ABCD")
+    ).resolves.toBe(false);
   });
 
   it("uses a fixed atomic captcha rate-limit window isolated by IP", async () => {
@@ -276,6 +289,7 @@ describe("authentication service integration", () => {
     for (const loginValue of ["", "   "]) {
       await expect(
         service.login(
+          undefined,
           {
             captchaCode: "ABCD",
             captchaId: "unused",
@@ -289,6 +303,7 @@ describe("authentication service integration", () => {
     for (const password of ["", "   "]) {
       await expect(
         service.login(
+          undefined,
           {
             captchaCode: "ABCD",
             captchaId: "unused",
@@ -346,6 +361,7 @@ describe("authentication service integration", () => {
       where: { id: loggedIn.sessionId },
     });
     const refreshed = await service.refresh(
+      undefined,
       loggedIn.refreshKey,
       context(`refresh-success-${sequence}`)
     );
@@ -371,9 +387,11 @@ describe("authentication service integration", () => {
           .update(secondaryRefreshKey)
           .digest("hex"),
         refreshKeyHmacKeyId: config.secondary?.id ?? "",
+        tenantId: "default",
       },
     });
     const secondaryResult = await service.refresh(
+      undefined,
       secondaryRefreshKey,
       context(`refresh-secondary-${sequence}`)
     );
@@ -395,6 +413,7 @@ describe("authentication service integration", () => {
           .update(expiredKey)
           .digest("hex"),
         refreshKeyHmacKeyId: config.primary.id,
+        tenantId: "default",
       },
     });
 
@@ -422,14 +441,28 @@ describe("authentication service integration", () => {
 
     const errors = await Promise.all([
       rejected(
-        service.refresh(`${prefix}-missing`, context("refresh-missing"))
+        service.refresh(
+          undefined,
+          `${prefix}-missing`,
+          context("refresh-missing")
+        )
       ),
-      rejected(service.refresh(expiredKey, context("refresh-expired"))),
       rejected(
-        service.refresh(disabledTokens.refreshKey, context("refresh-disabled"))
+        service.refresh(undefined, expiredKey, context("refresh-expired"))
       ),
       rejected(
-        service.refresh(deletedTokens.refreshKey, context("refresh-deleted"))
+        service.refresh(
+          undefined,
+          disabledTokens.refreshKey,
+          context("refresh-disabled")
+        )
+      ),
+      rejected(
+        service.refresh(
+          undefined,
+          deletedTokens.refreshKey,
+          context("refresh-deleted")
+        )
       ),
     ]);
     expect(new Set(errors.map((error) => error.code))).toEqual(
@@ -459,10 +492,11 @@ describe("authentication service integration", () => {
           .update(`${prefix}-expired-list`)
           .digest("hex"),
         refreshKeyHmacKeyId: config.primary.id,
+        tenantId: "default",
       },
     });
 
-    const listed = await service.listSessions(first.id);
+    const listed = await service.listSessions(await defaultScope, first.id);
     expect(listed).toHaveLength(1);
     expect(Object.keys(listed[0] ?? {}).sort()).toEqual([
       "createdAt",
@@ -472,6 +506,7 @@ describe("authentication service integration", () => {
     ]);
 
     await service.revokeSessions(
+      await defaultScope,
       second.id,
       context(`cross-revoke-${sequence}`),
       "admin_single_revoke",
@@ -479,31 +514,38 @@ describe("authentication service integration", () => {
     );
     await expect(
       service.refresh(
+        undefined,
         firstTokens.refreshKey,
         context(`cross-refresh-${sequence}`)
       )
     ).resolves.toMatchObject({ sessionId: firstTokens.sessionId });
 
     await service.revokeSessions(
+      await defaultScope,
       first.id,
       context(`bulk-revoke-${sequence}`),
       "admin_bulk_revoke"
     );
-    await expect(service.listSessions(first.id)).resolves.toEqual([]);
+    await expect(
+      service.listSessions(await defaultScope, first.id)
+    ).resolves.toEqual([]);
     await expect(
       service.refresh(
+        undefined,
         firstTokens.refreshKey,
         context(`bulk-refresh-${sequence}`)
       )
     ).rejects.toMatchObject({ code: "REFRESH_INVALID" });
     await expect(
       service.refresh(
+        undefined,
         secondTokens.refreshKey,
         context(`second-refresh-${sequence}`)
       )
     ).resolves.toMatchObject({ sessionId: secondTokens.sessionId });
     await expect(
       service.revokeSessions(
+        await defaultScope,
         first.id,
         context(`missing-revoke-${sequence}`),
         "admin_single_revoke",
@@ -517,6 +559,7 @@ describe("authentication service integration", () => {
     const successContext = context(`audit-login-success-${sequence}`);
     const challenge = await captcha(successContext.ip as string);
     const tokens = await service.login(
+      undefined,
       {
         captchaCode: "ABCD",
         captchaId: challenge.id,
@@ -526,11 +569,13 @@ describe("authentication service integration", () => {
       successContext
     );
     await service.refresh(
+      undefined,
       tokens.refreshKey,
       context(`audit-refresh-success-${sequence}`)
     );
     await rejected(
       service.refresh(
+        undefined,
         `${prefix}-bad-refresh`,
         context(`audit-refresh-fail-${sequence}`)
       )
@@ -539,12 +584,14 @@ describe("authentication service integration", () => {
       login(`${prefix}unknownaudit`, "wrong", `audit-login-fail-${sequence}`)
     );
     await service.revokeSessions(
+      await defaultScope,
       account.id,
       context(`audit-logout-${sequence}`),
       "logout",
       tokens.sessionId
     );
     await service.revokeSessions(
+      await defaultScope,
       account.id,
       context(`audit-revoke-${sequence}`),
       "admin_bulk_revoke"
@@ -569,7 +616,7 @@ describe("authentication service integration", () => {
     const unknown = rows.find(
       (row) => row.requestId === `${prefix}-audit-login-fail-${sequence}`
     );
-    expect(unknown).toMatchObject({ accountId: null, actorType: "service" });
+    expect(unknown).toMatchObject({ accountId: null, actorType: "anonymous" });
     const stored = await db.account.findUniqueOrThrow({
       where: { id: account.id },
     });
