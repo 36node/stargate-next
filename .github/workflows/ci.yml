@@ -720,6 +720,10 @@ jobs:
             echo "::add-mask::$value"
           }
 
+          api_curl() {
+            curl --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 "$@"
+          }
+
           require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
@@ -747,7 +751,7 @@ jobs:
 
           ensure_tenant() {
             response_file="$(mktemp)"
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               -X POST "$API_URL/v1/tenants" \
               -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
               -H "Content-Type: application/json" \
@@ -763,7 +767,7 @@ jobs:
               exit 1
             fi
 
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               "$API_URL/v1/tenants/test" \
               -H "x-api-key: $STARGATE_ADMIN_API_KEY")"
             if [ "$status" != "200" ]; then
@@ -783,7 +787,7 @@ jobs:
               echo "::error::Unexpected test tenant status: $tenant_status"
               exit 1
             fi
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               -X PATCH "$API_URL/v1/tenants/test" \
               -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
               -H "Content-Type: application/json" \
@@ -807,7 +811,7 @@ jobs:
               tenant_args=(-H "x-tenant-id: $tenant")
             fi
             payload="$(jq -cn --arg password "$SEED_PASSWORD" '{active:true,password:$password,username:"stargate"}')"
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               -X POST "$API_URL/v1/accounts" \
               -H "x-api-key: $key" \
               "${tenant_args[@]}" \
@@ -827,7 +831,7 @@ jobs:
             account_id=""
             for page in $(seq 0 19); do
               offset="$((page * 100))"
-              status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              status="$(api_curl --globoff -sS -o "$response_file" -w '%{http_code}' \
                 "$API_URL/v1/accounts?page[offset]=$offset&page[limit]=100" \
                 -H "x-api-key: $key" \
                 "${tenant_args[@]}")"
@@ -847,7 +851,7 @@ jobs:
               exit 1
             fi
 
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               -X PATCH "$API_URL/v1/accounts/$account_id" \
               -H "x-api-key: $key" \
               "${tenant_args[@]}" \
@@ -859,7 +863,7 @@ jobs:
               echo "::error::Enable $tenant account failed with HTTP $status"
               exit 1
             fi
-            status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
               -X POST "$API_URL/v1/accounts/$account_id/password" \
               -H "x-api-key: $key" \
               "${tenant_args[@]}" \
@@ -902,6 +906,10 @@ jobs:
             fi
           }
 
+          api_curl() {
+            curl --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 "$@"
+          }
+
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
             # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
             require_value STARGATE_API_KEY "$STARGATE_API_KEY"
@@ -919,7 +927,7 @@ jobs:
           echo "::add-mask::$SEED_PASSWORD"
           echo "::add-mask::$CAPTCHA_TEST_CODE"
 
-          if ! curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
+          if ! api_curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
             echo "::error::Preview API readiness check failed"
             exit 1
           fi
@@ -966,9 +974,9 @@ jobs:
             local token_tid
 
             if [ "$tenant" = "test" ]; then
-              captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
+              captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
             else
-              captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas")"
+              captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas")"
             fi
             if [ "$captcha_status" != "201" ]; then
               fail_response "Create $tenant captcha" "$captcha_status" "$captcha_response"
@@ -981,9 +989,9 @@ jobs:
 
             login_payload="$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')"
             if [ "$tenant" = "test" ]; then
-              login_status="$(curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$login_payload")"
+              login_status="$(api_curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$login_payload")"
             else
-              login_status="$(curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$login_payload")"
+              login_status="$(api_curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$login_payload")"
             fi
             if [ "$login_status" != "200" ]; then
               fail_response "Login $tenant account" "$login_status" "$login_response"
@@ -1023,12 +1031,12 @@ jobs:
             exit 1
           fi
 
-          refresh_status="$(curl -sS -o "$refresh_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/refresh" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$(jq -cn --arg refreshKey "$default_refresh_key" '{refreshKey:$refreshKey}')")"
+          refresh_status="$(api_curl -sS -o "$refresh_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/refresh" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$(jq -cn --arg refreshKey "$default_refresh_key" '{refreshKey:$refreshKey}')")"
           if [ "$refresh_status" != "401" ] || [ "$(jq -r '.code // empty' "$refresh_response")" != "REFRESH_INVALID" ]; then
             fail_response "Cross-tenant refresh rejection" "$refresh_status" "$refresh_response"
           fi
 
-          captcha_status="$(curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
+          captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
           if [ "$captcha_status" != "201" ]; then
             fail_response "Create fresh test captcha" "$captcha_status" "$captcha_response"
           fi
@@ -1037,7 +1045,7 @@ jobs:
             echo "::error::Fresh test captcha returned no id"
             exit 1
           fi
-          isolation_status="$(curl -sS -o "$isolation_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$test_captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')")"
+          isolation_status="$(api_curl -sS -o "$isolation_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$test_captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')")"
           if [ "$isolation_status" != "401" ]; then
             fail_response "Cross-tenant captcha rejection" "$isolation_status" "$isolation_response"
           fi
