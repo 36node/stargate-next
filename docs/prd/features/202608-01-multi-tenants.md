@@ -8,8 +8,8 @@
 
 范围：
 
-- 引入 Tenant 实体，持久化于 PostgreSQL；Tenant 由系统生成 ID，内置默认租户的 ID 与名称均为 `default`（migration/seed 保证存在，不可删除、不可改 ID）。
-- 通过 Admin API 创建与停用 Tenant；Tenant API Key 作为独立数据库实体（仅存 hash），支持创建、仅改名与删除。
+- 引入 Tenant 实体，持久化于 PostgreSQL；内置默认租户的 ID 与名称均为 `default`（migration/seed 保证存在，不可删除、不可改 ID）。
+- 通过 Admin API 创建、停用与分页查询 Tenant；创建时可省略 `id`（服务端生成）或由 Admin 指定（支持用 k8s namespace 命名）；创建 Tenant **不**创建 Tenant API Key。Tenant API Key 作为独立数据库实体（仅存 hash），须单独创建，并支持分页查询、仅改名与删除。
 - 请求解析 Tenant：显式指定时进入对应租户；未指定时落入 `default`，兼容现有调用方式。
 - 登录标识唯一性、Session、Captcha、登录失败计数/锁定、Account 创建幂等均按 Tenant 作用域生效。
 - 管理类 API（账户、会话）不得跨 Tenant 读写（Admin 代操作时仍必须落入明确的单一租户上下文）。
@@ -24,16 +24,19 @@
 | 术语 | 定义 | 不表示 |
 | --- | --- | --- |
 | Tenant（租户） | Stargate Next 认证数据的逻辑隔离边界。 | 不等于旧 Auth Namespace、Mekong Organization、Role 或 Permission。 |
-| Tenant ID / `tenantId` | Tenant 的稳定主键；也是请求 `x-tenant-id` 与 Access Token `tid` 的取值。 | 不由 Tenant 名称推导，也不是人类可读 slug。 |
+| Tenant ID / `tenantId` | Tenant 的稳定主键；也是请求 `x-tenant-id` 与 Access Token `tid` 的取值。预期与部署侧 K8s namespace 对齐。 | 不由 Tenant 名称推导；不是独立于 `id` 的 slug 字段。 |
 | Tenant Status | Tenant 是否允许进入认证数据面的状态：`active` 或 `disabled`。 | 不表示 Tenant 已被物理删除。 |
 | Tenant API Key | 固定归属一个 Tenant 的服务凭证，可管理该 Tenant 的账户、会话与 API Key。 | 不映射为人员 Account、Session 或业务权限。 |
 | Tenant API Key Digest | 使用专用 HMAC key 计算的 Tenant API Key 摘要，由 `hmacKeyId` 与 `hash` 组成。 | 不可还原为 API Key 明文。 |
-| Admin API Key | 平台信任根，用于管理 Tenant 与 Tenant API Key。 | 不是任何 Tenant 的业务凭证；代操作时仍必须解析到单一 Tenant。 |
+| Admin API Key | 平台信任根，用于管理 Tenant（含可选指定 `id`、分页列表）与 Tenant API Key（含分页列表）。 | 不是任何 Tenant 的业务凭证；代操作业务资源时仍必须解析到单一 Tenant。 |
 | Tenant Principal | Access Token 校验后的 `{ accountId, sessionId, tenantId }`。 | 不包含 Profile、Organization、Role 或 Permission。 |
 
 ### 标识与值对象
 
-- 非默认 `TenantId` 由服务端生成 CUID，创建后不可修改；默认 Tenant 固定使用字面量 `default`。
+- `TenantId` 创建后不可修改；默认 Tenant 固定使用字面量 `default`。
+- **API 校验（严）**：除保留字 `default` 外，`TenantId` 必须符合 K8s namespace / DNS label：`[a-z0-9]([-a-z0-9]*[a-z0-9])?`，最长 **63**。
+- **DB 存储（宽）**：`id` 列使用 `VARCHAR(200)`，物理上限宽于 API，便于演进；写入前仍须通过 API 校验。
+- 创建时：不传 `id` → 服务端生成满足上述 API 约束的稳定 ID（如 CUID）；传 `id` → **仅** `STARGATE_ADMIN_API_KEY` 可指定，用于与 K8s namespace 对齐；冲突返回 `TENANT_ALREADY_EXISTS`。
 - `TenantName` 仅为展示文本，不参与路由、不要求唯一，也不得用于认证。
 - `TenantApiKeyDigest = { hmacKeyId, hash }`，其中 `hash = HMAC-SHA256(secret, fullTenantApiKey)`；`(hmacKeyId, hash)` 在全部 Tenant API Key 中唯一。
 - `firstFour` 是 API Key 随机主体的展示元数据，不是认证材料。
@@ -55,12 +58,13 @@ Tenant 是 Tenant 生命周期的聚合根；Tenant API Key 是独立管理的�
 
 Tenant 是认证数据的隔离边界，不是业务组织：
 
-- `id` 为稳定主键，即 API 和领域模型中的 `tenantId`、JWT 的 `tid` 与 `x-tenant-id` 的取值。非默认 Tenant 的 ID 由服务端生成 CUID，调用方不得指定。
-- `name` 为仅用于展示和描述的可选文本；不参与请求路由、不要求全局唯一、不是 slug。
+- `id` 为稳定主键，即 API 和领域模型中的 `tenantId`、JWT 的 `tid` 与 `x-tenant-id` 的取值；创建后不可修改。预期与 k8s namespace 同名对齐（尤其是测试/CI 环境）。
+- `name` 为仅用于展示和描述的可选文本；不参与请求路由、不要求全局唯一、不是独立 slug。
 - 状态：`active` | `disabled`。`disabled` 后拒绝该租户下的管理 API、登录与 Refresh；已签发 Access Token 仍按现有规则可用至自身过期。
-- `default`：服务启动/迁移后始终存在且为 `active`；`id` 与 `name` 均为字面量 `default`；不可删除、不可改 ID；可被 Admin 停用（运维需谨慎，停用后等同关闭默认租户认证面）。
-- 非默认 Tenant 由 Admin API 创建，Admin 仅可提交 `name`，服务返回系统生成的 `id`；停用为状态变更，不物理删除行，以免 Account/审计历史悬空。
-- Tenant 不进入 Mekong 授权模型；与 Organization、Role、Permission 无关。**Tenant ≠ Namespace ≠ Organization。**
+- `default`：服务启动/迁移后始终存在且为 `active`；`id` 与 `name` 均为字面量 `default`；不可删除、不可改 ID；不可被再次创建占用；可被 Admin 停用（运维需谨慎，停用后等同关闭默认租户认证面）。
+- 非默认 Tenant 由 Admin API 创建：可只提交 `name`（服务生成 `id`），或同时提交符合 API 约束的 `id` 与可选 `name`；`id` 已存在时返回 `TENANT_ALREADY_EXISTS`（便于 CI/CD 幂等）；**创建 Tenant 不附带 Tenant API Key**，Key 须另一步创建；停用为状态变更，不物理删除行，以免 Account/审计历史悬空。
+- Admin 可分页列出 Tenant，并按 `name` **精确匹配**过滤（`name` 仍不唯一；列表用于运维与测试环境探测，不以 `name` 作为认证或路由键）。
+- Tenant 不进入 Mekong 授权模型；与 Organization、Role、Permission 无关。**Tenant ≠ 旧 Auth Namespace ≠ Organization**；`tenantId` 可与 K8s namespace 对齐，但不因此成为业务组织模型。
 
 ## 请求归属与认证策略
 
@@ -79,17 +83,30 @@ Tenant 是认证数据的隔离边界，不是业务组织：
 | 凭证 | 来源 | 权限 |
 | --- | --- | --- |
 | `STARGATE_API_KEY` | 环境/Secret（配置） | 仅绑定 `default` 租户，兼容现网；**不是**平台最高权限。 |
-| Tenant API Key | PostgreSQL（只存 hash） | 固定在所属 Tenant；可管理该租户账户/会话及同租户的 API Key。 |
-| `STARGATE_ADMIN_API_KEY` | 环境/Secret（配置） | 平台信任根：创建/停用 Tenant、创建、编辑或删除 Tenant API Key；代操作资源时须通过 `x-tenant-id`（缺省为 `default`）落入单一租户上下文。 |
+| Tenant API Key | PostgreSQL（只存 hash） | 固定在所属 Tenant；可管理该租户账户/会话及同租户的 API Key（含分页列表）。 |
+| `STARGATE_ADMIN_API_KEY` | 环境/Secret（配置） | 平台信任根：创建/停用/分页查询 Tenant（创建时可指定 `id`）、创建/分页查询/编辑/删除 Tenant API Key；代操作账户/会话等业务资源时须通过 `x-tenant-id`（缺省为 `default`）落入单一租户上下文。 |
 
 解析规则：
 
 1. 命中 Tenant API Key → 租户上下文固定为该 Key 所属 Tenant；携带其他 `x-tenant-id` 时拒绝。
 2. 命中 `STARGATE_API_KEY` → 行为同 `default` 的 Tenant API Key。
-3. 命中 `STARGATE_ADMIN_API_KEY` → 按 `x-tenant-id`（缺省 `default`）选择目标租户；不得无租户上下文扫全库。
+3. 命中 `STARGATE_ADMIN_API_KEY` → 按 `x-tenant-id`（缺省 `default`）选择目标租户；代操作账户/会话等业务资源时不得无租户上下文扫全库。Tenant 控制面（创建、停用、分页列表）属平台级操作，不依赖业务租户上下文。
 4. 未携带或错误的 API Key 行为与现网一致（`API_KEY_INVALID`）。
 
 登录、Captcha、Refresh、Logout 等公开认证接口不依赖 API Key；其 Tenant 由 `x-tenant-id`（缺省 `default`）决定。
+
+### Tenant 管理（Admin）
+
+仅 `STARGATE_ADMIN_API_KEY` 可调用：
+
+- **创建** `POST`：请求体可含可选 `id`、可选 `name`。
+  - 不传 `id`：服务端生成满足 API 约束的 ID。
+  - 传 `id`：须通过 API 校验（支持`a-zA-Z0-9`和`-`、长度≤63、非保留 `default`）；已存在则 `TENANT_ALREADY_EXISTS`。
+  - Tenant API Key / `STARGATE_API_KEY` 若提交 `id` 字段，一律拒绝。
+- **停用 / 启用**：按 `tenantId` 变更状态，不物理删除。
+- **分页列表** `GET`：支持分页参数。
+
+列表与按 `id` 的存在性冲突响应均不得返回 Tenant API Key 明文或 hash。
 
 ### Tenant API Key 管理
 
@@ -106,7 +123,8 @@ Tenant API Key 是独立的 PostgreSQL 实体，字段包括：
 
 - **摘要算法与轮换**：复用 Refresh Key 的摘要模式：`hash = HMAC-SHA256(secret, fullTenantApiKey)`，并记录生成该摘要的 `hmacKeyId`。`firstFour` 从 API Key 随机主体提取，但不参与摘要或认证。新 Key 使用 primary HMAC key；校验时分别以 primary 和可选 secondary HMAC key 计算候选 `(hmacKeyId, hash)` 后精确查询。`(hmacKeyId, hash)` 在全部 Tenant API Key 中唯一，使 HMAC secret 可以无停机轮换。
 - **密钥隔离**：Tenant API Key 使用专用的 `TENANT_API_KEY_HMAC_*` primary/secondary 配置；不得复用 Refresh Key、Captcha 或 JWT 的 HMAC/signing secret。
-- **创建**：Admin 创建 Tenant 时可同时创建首把 Key；Admin 或该 Tenant 的有效 Key 也可为已有 Tenant 创建新 Key。创建响应中的明文 Key **仅出现一次**，服务端不使用可逆加密存储明文。
+- **创建**：Tenant API Key **仅**通过独立的 Key 管理接口创建，不与创建 Tenant 绑定。Admin 可为任意已有 Tenant 创建 Key；该 Tenant 的有效 Key 也可为同租户创建新 Key。创建响应中的明文 Key **仅出现一次**，服务端不使用可逆加密存储明文。无 Key 的 Tenant 仍可由 Admin 凭 `STARGATE_ADMIN_API_KEY` + `x-tenant-id` 代操作。
+- **分页列表**：在单一 Tenant 上下文内分页列出该租户的 API Key。Admin 通过 `x-tenant-id`（缺省 `default`）指定目标租户；Tenant API Key / `STARGATE_API_KEY` 仅可列出自身所属租户的 Key。列表项含 `id`、`tenantId`、`name`、`firstFour`、`createdAt`、`updatedAt` 等元数据，**不得**返回明文 Key、`hash` 或 HMAC secret；可用 `firstFour` 做人工辨认。
 - **并存与迁移**：创建新 Key 不影响任何已存在 Key；新旧 Key 可并行使用，便于调用方完成迁移。
 - **编辑**：仅 Admin 或同 Tenant 的有效 Key 可以编辑该 Tenant 的 Key；请求体只允许变更 `name`，不得变更 `id`、`tenantId`、`firstFour`、`hmacKeyId` 或 `hash`。
 - **删除**：Admin 可删除任意 Tenant API Key；同 Tenant 的 Key 可删除该 Tenant 的其他 Key，但**不得删除当前用于认证该请求的同一把 Key**。删除成功后目标 Key 立即失效；其他未删除 Key 不受影响。
@@ -186,7 +204,7 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 ## 配置、持久化与兼容
 
-**PostgreSQL 持有**：Tenant 行与状态、Tenant API Key 的 `id`、`tenantId`、`name`、`firstFour`、`hmacKeyId`、`hash` 及生命周期元数据、带 `tenantId` 的认证业务数据。
+**PostgreSQL 持有**：Tenant 行与状态（`id` 列 `VARCHAR(200)`）、Tenant API Key 的 `id`、`tenantId`、`name`、`firstFour`、`hmacKeyId`、`hash` 及生命周期元数据、带 `tenantId` 的认证业务数据。
 
 **配置 / Secret 持有**：`STARGATE_ADMIN_API_KEY`、`STARGATE_API_KEY`、JWT/HMAC 等现有密钥。
 
@@ -198,7 +216,8 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 - 不把旧 Auth Namespace 映射为 Tenant。
 - 不提供公开自助「注册新租户」门户（仅 Admin 控制面创建）。
 - 不对 Tenant API Key 做可逆加密存库或二次展示同一明文。
-- 不提供人类可读的 Tenant slug，也不按 Tenant `name` 解析请求；若未来需要，再独立设计其唯一性与变更语义。
+- 不引入独立于 `id` 的 Tenant slug 字段，也不按 Tenant `name` 解析 `x-tenant-id`；Admin 指定的 `id` 本身即主键（可与 k8s namespace 对齐）。
+- 不以 `name` 唯一约束保证幂等；需要确定性幂等时由 Admin 指定 `id`。
 
 ## 验收
 
@@ -233,19 +252,41 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 **When**
 
-- 创建名称为“应用 A”的 Tenant，并取得首把 Tenant API Key；随后将该 Tenant 设为 `disabled`。
+- 不传 `id`，创建名称为“应用 A”的 Tenant；再单独为其创建一把 Tenant API Key；随后将该 Tenant 设为 `disabled`。
+- 另一次创建传入 `id` 为合法 K8s namespace 形态（如 `app-a`）及可选 `name`；再次用同一 `id` 创建。
 
 **Then**
 
-- 创建响应返回系统生成的 `tenantId` 与仅一次可见的 API Key 明文；库中仅有 Key hash。
+- 创建 Tenant 的响应仅含 Tenant 元数据，**不含** API Key；未传 `id` 时返回服务端生成且满足 API 约束的 `tenantId`。
+- 传入 `id` 时，创建成功后 `tenantId` 等于请求值；再次创建同一 `id` 返回 `TENANT_ALREADY_EXISTS`，不新建行。
+- 传入非法 `id`（超过 63、含大写/非法字符、或 `default`）被 API 拒绝；DB 列宽为 200 不意味着 API 放宽。
 - `name` 仅为描述，不要求唯一；后续修改名称不改变 `tenantId`，也不影响以该 ID 传入 `x-tenant-id` 的请求。
-- 使用该 Tenant API Key 可在 `active` 期间管理该 Tenant 的资源。
+- 随后单独创建的 Tenant API Key 明文仅出现一次；可在 `active` 期间管理该 Tenant 的资源。
 - 停用后：该 Tenant Key 与该租户下的登录、Refresh、账户管理均失败；不物理删除 Tenant 行与既有 Account 行。
-- 使用 Tenant Key 或非 Admin 凭证无法创建/停用 Tenant。
+- 使用 Tenant Key 或非 Admin 凭证无法创建/停用 Tenant，也无法指定 `id`。
 
 **验证**
 
 - Tenant 管理 API 黑盒测试；审计记录创建与停用事件（不含 Key 明文或 hash）。
+
+### Admin 分页查询 Tenant
+
+**Given**
+
+- 调用方持有有效 `STARGATE_ADMIN_API_KEY`；库中存在多个 Tenant。
+
+**When**
+
+- 分页列出全部 Tenant。
+
+**Then**
+
+- 返回分页结果，含 `id`、`name`、`status` 等元数据，不含任何 API Key 明文或 hash。
+- 非 Admin 凭证不可调用列表接口。
+
+**验证**
+
+- Tenant 列表 API 黑盒测试。
 
 ### 显式租户隔离账户与登录标识
 
@@ -310,7 +351,7 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 - Admin + 账户管理黑盒测试。
 
-### Tenant API Key 创建、编辑与删除
+### Tenant API Key 创建、编辑、分页查询与删除
 
 **Given**
 
@@ -318,13 +359,16 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 **When**
 
-- 使用 `keyA` 创建另一把名为“迁移用”的 Key `keyB`，随后将 `keyB` 的名称改为“生产调用”。 
-- 分别使用 `keyA`、`keyB` 调用管理 API；再使用 `keyA` 删除 `keyB`。
-- 使用 `keyA` 尝试删除自身。
+- 使用 `keyA` 创建另一把名为“迁移用”的 Key `keyB`，随后将 `keyB` 的名称改为“生产调用”。
+- 分别使用 `keyA`、`keyB` 调用管理 API；分页列出 `{appATenantId}` 下的 API Key。
+- 使用 `keyA` 删除 `keyB`；再使用 `keyA` 尝试删除自身。
+- 使用 Admin Key 携带 `x-tenant-id: {appATenantId}` 分页列出该租户 API Key；使用 `{appATenantId}` 的 Key 尝试列出其他租户的 Key。
 
 **Then**
 
-- 创建 `keyB` 后，`keyA` 与 `keyB` 均可用；新 Key 的明文仅出现一次，后续列表仅展示 `firstFour` 以供人工辨认。
+- 创建 `keyB` 后，`keyA` 与 `keyB` 均可用；新 Key 的明文仅出现一次。
+- 分页列表返回该租户下的 Key 元数据（含 `id`、`name`、`firstFour`、时间戳等），不含明文、`hash` 或 HMAC secret；`firstFour` 可供人工辨认。
+- Admin 与同租户 Key 均可列出该租户 Key；跨租户列举被拒绝或无法看到其他租户数据。
 - 编辑仅更新 `keyB.name`，不得修改其 `id`、`tenantId`、`hmacKeyId` 或 `hash`。
 - 删除 `keyB` 后，`keyB` 立即失效，`keyA` 继续有效。
 - 使用 `keyA` 删除自身被拒绝；Admin 仍可删除任意 Tenant API Key。
@@ -332,7 +376,7 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 **验证**
 
-- Key 创建、编辑、并存、删除与禁止自删的黑盒测试。
+- Key 创建、编辑、分页列表、并存、删除与禁止自删的黑盒测试。
 
 ### Captcha、限流与幂等按租户隔离
 
@@ -384,7 +428,7 @@ Account ID、Session ID 仍为全局唯一稳定标识（CUID）。查询与鉴�
 
 **When**
 
-- 请求携带一个不存在的 CUID 形式 Tenant ID；或携带已停用的 `{appATenantId}`。
+- 请求携带一个不存在的合法形态 Tenant ID；或携带已停用的 `{appATenantId}`。
 
 **Then**
 
