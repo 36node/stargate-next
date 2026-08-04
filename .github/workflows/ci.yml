@@ -725,6 +725,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
             # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
             STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
+            SEED_PASSWORD="$(printf 'stargate-next-pr-seed-password:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
           fi
 
           require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
@@ -906,6 +907,7 @@ jobs:
             require_value STARGATE_API_KEY "$STARGATE_API_KEY"
             STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
             CAPTCHA_TEST_CODE="$(printf 'stargate-next-pr-captcha:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print toupper(substr($1, 1, 4))}')"
+            SEED_PASSWORD="$(printf 'stargate-next-pr-seed-password:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
           fi
 
           require_value API_URL "$API_URL"
