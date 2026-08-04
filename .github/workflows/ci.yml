@@ -344,8 +344,17 @@ jobs:
   build-helm-chart:
     name: Build Helm chart
     runs-on: arc-runners-mekong
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    if: >-
+      ${{
+        github.event_name == 'pull_request' ||
+        (
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        )
+      }}
     timeout-minutes: 15
+    outputs:
+      chart_version: ${{ steps.chart-version.outputs.chart_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -396,25 +405,67 @@ jobs:
       - name: Lint Helm chart
         run: helm lint deploy/helm-chart
 
+      - name: Resolve chart version
+        id: chart-version
+        env:
+          CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            chart_version="0.0.0-pr-${PR_NUMBER}-${CHART_SHA}"
+          else
+            chart_version="0.0.0-main"
+          fi
+
+          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
+
       - name: Package and push Helm chart
         run: |
           set -euo pipefail
 
           chart_dir="deploy/helm-chart"
           destination="${RUNNER_TEMP}/helm-chart"
-          branch_version="0.0.0-main"
           fingerprint_version="0.0.0-input-${CHART_SHA}"
           repository="oci://${HARBOR_DOMAIN}/${HARBOR_PROJECT}"
 
           mkdir -p "$destination"
 
-          helm package "$chart_dir" --version "$branch_version" --destination "$destination"
-          helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
+          helm package "$chart_dir" --version "$CHART_VERSION" --destination "$destination"
 
-          helm push "${destination}/stargate-chart-${branch_version}.tgz" "$repository"
-          helm push "${destination}/stargate-chart-${fingerprint_version}.tgz" "$repository"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
+            rendered_file="${RUNNER_TEMP}/ticket-232-preview-chart.yaml"
+            api_key="ticket-232-preview-api-key"
+            refresh_secret="ticket-232-preview-refresh-secret"
+            expected_admin_key="$(printf 'stargate-next-pr-admin:%s' "$api_key" | sha256sum | awk '{print $1}')"
+            expected_tenant_secret="$(printf 'stargate-next-pr-tenant-api-key:%s' "$refresh_secret" | sha256sum | awk '{print $1}')"
+            expected_captcha_code="$(printf 'stargate-next-pr-captcha:%s' "$api_key" | sha256sum | awk '{print toupper(substr($1, 1, 4))}')"
+
+            helm template stargate-next "${destination}/stargate-chart-${CHART_VERSION}.tgz" \
+              --set-string stargateNext.secrets.stargateApiKey="$api_key" \
+              --set-string stargateNext.secrets.refreshKeyHmacPrimaryKeyId=ticket-232-preview-refresh \
+              --set-string stargateNext.secrets.refreshKeyHmacPrimarySecret="$refresh_secret" \
+              > "$rendered_file"
+
+            grep -Fq "STARGATE_ADMIN_API_KEY: \"${expected_admin_key}\"" "$rendered_file"
+            grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "ticket-232-preview-primary"' "$rendered_file"
+            grep -Fq "TENANT_API_KEY_HMAC_PRIMARY_SECRET: \"${expected_tenant_secret}\"" "$rendered_file"
+            grep -Fq 'STARGATE_DEPLOY_TIER: "preview"' "$rendered_file"
+            grep -Fq 'CAPTCHA_TEST_MODE: "true"' "$rendered_file"
+            grep -Fq "CAPTCHA_TEST_CODE: \"${expected_captcha_code}\"" "$rendered_file"
+          fi
+
+          helm push "${destination}/stargate-chart-${CHART_VERSION}.tgz" "$repository"
+
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
+            helm push "${destination}/stargate-chart-${fingerprint_version}.tgz" "$repository"
+          fi
         env:
           CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
+          CHART_VERSION: ${{ steps.chart-version.outputs.chart_version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
   deploy:
     name: Deploy
@@ -431,10 +482,7 @@ jobs:
           )
         ) &&
         needs['test-and-build'].result == 'success' &&
-        (
-          github.event_name == 'pull_request' ||
-          needs['build-helm-chart'].result == 'success'
-        )
+        needs['build-helm-chart'].result == 'success'
       }}
     runs-on: arc-runners-mekong
     timeout-minutes: 30
@@ -571,6 +619,7 @@ jobs:
           STARGATE_NEXT_TAG: ${{ steps.deploy-images.outputs.stargate_next_tag }}
           PLAYGROUND_TAG: ${{ steps.deploy-images.outputs.playground_tag }}
           DB_TAG: ${{ steps.deploy-images.outputs.db_tag }}
+          STARGATE_CHART_VERSION: ${{ needs.build-helm-chart.outputs.chart_version }}
         run: |
           set -euo pipefail
 
@@ -599,11 +648,13 @@ jobs:
             --arg stargate_next "$STARGATE_NEXT_TAG" \
             --arg playground "$PLAYGROUND_TAG" \
             --arg db "$DB_TAG" \
+            --arg chart_version "$STARGATE_CHART_VERSION" \
             '{
               overrides: {
                 stargate_next_tag: $stargate_next,
                 stargate_next_playground_tag: $playground,
-                stargate_next_db_tag: $db
+                stargate_next_db_tag: $db,
+                stargate_next_chart_version: $chart_version
               }
             }' > /tmp/deploy-overrides.json
 
@@ -670,6 +721,12 @@ jobs:
           }
 
           require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
+            # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
+            STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
+          fi
+
           require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
           require_secret SEED_PASSWORD "$SEED_PASSWORD"
 
@@ -824,6 +881,7 @@ jobs:
           SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
           STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
           STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: "Preview smoke: dual tenant"
         if: ${{ steps.deploy.outputs.outcome == 'success' }}
@@ -842,6 +900,13 @@ jobs:
               exit 1
             fi
           }
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
+            # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
+            require_value STARGATE_API_KEY "$STARGATE_API_KEY"
+            STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
+            CAPTCHA_TEST_CODE="$(printf 'stargate-next-pr-captcha:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print toupper(substr($1, 1, 4))}')"
+          fi
 
           require_value API_URL "$API_URL"
           # Admin Key 由前置 seed 使用；此处保留检查以确认 workflow 与 Pod Secret 已就绪。
@@ -979,8 +1044,10 @@ jobs:
         env:
           API_URL: ${{ steps.deploy-context.outputs.api_url }}
           STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
+          STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
           SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
           CAPTCHA_TEST_CODE: ${{ secrets.PREVIEW_CAPTCHA_TEST_CODE }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Comment PR deploy URLs
         if: github.event_name == 'pull_request'

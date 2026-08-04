@@ -25,6 +25,11 @@
         "default": "main",
         "label": "DB image tag",
         "overridable": true
+      },
+      "stargate_next_chart_version": {
+        "default": "0.0.0-main",
+        "label": "Stargate Next Helm chart version",
+        "overridable": true
       }
     },
     "image": "harbor.36node.com/36node/cluster",
