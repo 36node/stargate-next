@@ -716,7 +716,7 @@ jobs:
 
           require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
           require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
-          require_secret SEED_PASSWORD "$SEED_PASSWORD"
+          SEED_PASSWORD="stargate@36node"
 
           API_URL="${{ steps.deploy-context.outputs.api_url }}"
           echo "Waiting for API to be ready at $API_URL/health/ready"
@@ -866,7 +866,6 @@ jobs:
           ensure_account test "$STARGATE_ADMIN_API_KEY" true
           echo "Default and test tenant accounts converged"
         env:
-          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
           STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
           STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
 
