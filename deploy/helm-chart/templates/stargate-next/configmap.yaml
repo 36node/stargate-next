@@ -1,14 +1,4 @@
 {{- if .Values.stargateNext.enabled }}
-{{- $temporaryPr42 := hasPrefix "0.0.0-pr-42-" .Chart.Version }}
-{{- $deployTier := .Values.stargateNext.config.deployTier }}
-{{- $captchaTestMode := .Values.stargateNext.config.captchaTestMode }}
-{{- $captchaTestCode := .Values.stargateNext.config.captchaTestCode }}
-{{- if $temporaryPr42 }}
-{{- /* TODO(ticket-232): remove after Preview/UAT CAPTCHA settings are injected by the cluster playbook. */}}
-{{- $deployTier = "preview" }}
-{{- $captchaTestMode = true }}
-{{- $captchaTestCode = printf "stargate-next-pr-captcha:%s" .Values.stargateNext.secrets.stargateApiKey | sha256sum | trunc 4 | upper }}
-{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,7 +8,7 @@ metadata:
     app.kubernetes.io/component: stargate-next
 data:
   NODE_ENV: {{ .Values.stargateNext.config.nodeEnv | quote }}
-  STARGATE_DEPLOY_TIER: {{ $deployTier | quote }}
+  STARGATE_DEPLOY_TIER: {{ .Values.stargateNext.config.deployTier | quote }}
   PORT: "9527"
   LOG_LEVEL: {{ .Values.stargateNext.config.logLevel | quote }}
   REDIS_KEY_PREFIX: {{ .Values.stargateNext.config.redisKeyPrefix | quote }}
@@ -31,8 +21,8 @@ data:
   CAPTCHA_CREATE_WINDOW_SECONDS: {{ .Values.stargateNext.config.captchaCreateWindowSeconds | quote }}
   LOGIN_MAX_ATTEMPTS: {{ .Values.stargateNext.config.loginMaxAttempts | quote }}
   LOGIN_LOCK_SECONDS: {{ .Values.stargateNext.config.loginLockSeconds | quote }}
-  {{- if $captchaTestMode }}
+  {{- if .Values.stargateNext.config.captchaTestMode }}
   CAPTCHA_TEST_MODE: "true"
-  CAPTCHA_TEST_CODE: {{ $captchaTestCode | quote }}
+  CAPTCHA_TEST_CODE: {{ .Values.stargateNext.config.captchaTestCode | quote }}
   {{- end }}
 {{- end }}

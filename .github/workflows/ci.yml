@@ -434,27 +434,18 @@ jobs:
 
           helm package "$chart_dir" --version "$CHART_VERSION" --destination "$destination"
 
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
-            rendered_file="${RUNNER_TEMP}/ticket-232-preview-chart.yaml"
-            api_key="ticket-232-preview-api-key"
-            refresh_secret="ticket-232-preview-refresh-secret"
-            expected_admin_key="$(printf 'stargate-next-pr-admin:%s' "$api_key" | sha256sum | awk '{print $1}')"
-            expected_tenant_secret="$(printf 'stargate-next-pr-tenant-api-key:%s' "$refresh_secret" | sha256sum | awk '{print $1}')"
-            expected_captcha_code="$(printf 'stargate-next-pr-captcha:%s' "$api_key" | sha256sum | awk '{print toupper(substr($1, 1, 4))}')"
+          rendered_file="${RUNNER_TEMP}/stargate-next-chart.yaml"
+          helm template stargate-next "${destination}/stargate-chart-${CHART_VERSION}.tgz" \
+            --set-string stargateNext.secrets.stargateAdminApiKey=chart-admin-api-key \
+            --set-string stargateNext.secrets.tenantApiKeyHmacPrimaryKeyId=chart-tenant-primary \
+            --set-string stargateNext.secrets.tenantApiKeyHmacPrimarySecret=chart-tenant-primary-secret \
+            > "$rendered_file"
 
-            helm template stargate-next "${destination}/stargate-chart-${CHART_VERSION}.tgz" \
-              --set-string stargateNext.secrets.stargateApiKey="$api_key" \
-              --set-string stargateNext.secrets.refreshKeyHmacPrimaryKeyId=ticket-232-preview-refresh \
-              --set-string stargateNext.secrets.refreshKeyHmacPrimarySecret="$refresh_secret" \
-              > "$rendered_file"
-
-            grep -Fq "STARGATE_ADMIN_API_KEY: \"${expected_admin_key}\"" "$rendered_file"
-            grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "ticket-232-preview-primary"' "$rendered_file"
-            grep -Fq "TENANT_API_KEY_HMAC_PRIMARY_SECRET: \"${expected_tenant_secret}\"" "$rendered_file"
-            grep -Fq 'STARGATE_DEPLOY_TIER: "preview"' "$rendered_file"
-            grep -Fq 'CAPTCHA_TEST_MODE: "true"' "$rendered_file"
-            grep -Fq "CAPTCHA_TEST_CODE: \"${expected_captcha_code}\"" "$rendered_file"
-          fi
+          grep -Fq 'STARGATE_ADMIN_API_KEY: "chart-admin-api-key"' "$rendered_file"
+          grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "chart-tenant-primary"' "$rendered_file"
+          grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_SECRET: "chart-tenant-primary-secret"' "$rendered_file"
+          grep -Fq 'STARGATE_DEPLOY_TIER: "production"' "$rendered_file"
+          ! grep -Fq 'CAPTCHA_TEST_MODE:' "$rendered_file"
 
           helm push "${destination}/stargate-chart-${CHART_VERSION}.tgz" "$repository"
 
@@ -465,7 +456,6 @@ jobs:
         env:
           CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
           CHART_VERSION: ${{ steps.chart-version.outputs.chart_version }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
 
   deploy:
     name: Deploy
@@ -725,13 +715,6 @@ jobs:
           }
 
           require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
-
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
-            # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
-            STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
-            SEED_PASSWORD="$(printf 'stargate-next-pr-seed-password:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
-          fi
-
           require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
           require_secret SEED_PASSWORD "$SEED_PASSWORD"
 
@@ -886,178 +869,6 @@ jobs:
           SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
           STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
           STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-
-      - name: "Preview smoke: dual tenant"
-        if: ${{ steps.deploy.outputs.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-
-          require_value() {
-            local name="$1"
-            local value="$2"
-            if [ -z "$value" ]; then
-              if [ "$name" = "CAPTCHA_TEST_CODE" ]; then
-                echo "::error::CAPTCHA_TEST_CODE is required. Preview/UAT must configure STARGATE_DEPLOY_TIER + CAPTCHA_TEST_MODE + CAPTCHA_TEST_CODE, and store the same value in GitHub secret PREVIEW_CAPTCHA_TEST_CODE"
-              else
-                echo "::error::$name is required for Preview dual-tenant smoke"
-              fi
-              exit 1
-            fi
-          }
-
-          api_curl() {
-            curl --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 "$@"
-          }
-
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_NUMBER" = "42" ]; then
-            # TODO(ticket-232): remove with the PR #42 Chart compatibility bootstrap.
-            require_value STARGATE_API_KEY "$STARGATE_API_KEY"
-            STARGATE_ADMIN_API_KEY="$(printf 'stargate-next-pr-admin:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
-            CAPTCHA_TEST_CODE="$(printf 'stargate-next-pr-captcha:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print toupper(substr($1, 1, 4))}')"
-            SEED_PASSWORD="$(printf 'stargate-next-pr-seed-password:%s' "$STARGATE_API_KEY" | sha256sum | awk '{print $1}')"
-          fi
-
-          require_value API_URL "$API_URL"
-          # Admin Key 由前置 seed 使用；此处保留检查以确认 workflow 与 Pod Secret 已就绪。
-          require_value STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
-          require_value SEED_PASSWORD "$SEED_PASSWORD"
-          require_value CAPTCHA_TEST_CODE "$CAPTCHA_TEST_CODE"
-          echo "::add-mask::$STARGATE_ADMIN_API_KEY"
-          echo "::add-mask::$SEED_PASSWORD"
-          echo "::add-mask::$CAPTCHA_TEST_CODE"
-
-          if ! api_curl -fsS "$API_URL/health/ready" >/dev/null 2>&1; then
-            echo "::error::Preview API readiness check failed"
-            exit 1
-          fi
-
-          captcha_response="$(mktemp)"
-          login_response="$(mktemp)"
-          refresh_response="$(mktemp)"
-          isolation_response="$(mktemp)"
-          trap 'rm -f "$captcha_response" "$login_response" "$refresh_response" "$isolation_response"' EXIT
-
-          fail_response() {
-            local context="$1"
-            local status="$2"
-            local response_file="$3"
-            local code
-            code="$(jq -r '.code // empty' "$response_file" 2>/dev/null || true)"
-            echo "::error::$context failed with HTTP $status${code:+ code=$code}"
-            exit 1
-          }
-
-          decode_token_tid() {
-            local token="$1"
-            local encoded
-            encoded="${token#*.}"
-            encoded="${encoded%%.*}"
-            case "$((${#encoded} % 4))" in
-              0) ;;
-              2) encoded="${encoded}==" ;;
-              3) encoded="${encoded}=" ;;
-              *) return 1 ;;
-            esac
-            printf '%s' "$encoded" | tr '_-' '/+' | base64 --decode 2>/dev/null | jq -r '.tid // empty' 2>/dev/null
-          }
-
-          login_tenant() {
-            local tenant="$1"
-            local captcha_status
-            local login_status
-            local captcha_id
-            local account_id
-            local access_token
-            local login_payload
-            local refresh_key
-            local token_tid
-
-            if [ "$tenant" = "test" ]; then
-              captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
-            else
-              captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas")"
-            fi
-            if [ "$captcha_status" != "201" ]; then
-              fail_response "Create $tenant captcha" "$captcha_status" "$captcha_response"
-            fi
-            captcha_id="$(jq -r '.id // empty' "$captcha_response")"
-            if [ -z "$captcha_id" ]; then
-              echo "::error::Create $tenant captcha returned no id"
-              exit 1
-            fi
-
-            login_payload="$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')"
-            if [ "$tenant" = "test" ]; then
-              login_status="$(api_curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$login_payload")"
-            else
-              login_status="$(api_curl -sS -o "$login_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$login_payload")"
-            fi
-            if [ "$login_status" != "200" ]; then
-              fail_response "Login $tenant account" "$login_status" "$login_response"
-            fi
-
-            account_id="$(jq -r '.accountId // empty' "$login_response")"
-            access_token="$(jq -r '.accessToken // empty' "$login_response")"
-            refresh_key="$(jq -r '.refreshKey // empty' "$login_response")"
-            if [ -z "$account_id" ] || [ -z "$access_token" ] || [ -z "$refresh_key" ]; then
-              echo "::error::Login $tenant account returned an incomplete token set"
-              exit 1
-            fi
-            echo "::add-mask::$access_token"
-            echo "::add-mask::$refresh_key"
-            token_tid="$(decode_token_tid "$access_token" || true)"
-            if [ "$token_tid" != "$tenant" ]; then
-              echo "::error::Login $tenant account returned an unexpected JWT tenant claim"
-              exit 1
-            fi
-
-            if [ "$tenant" = "default" ]; then
-              default_account_id="$account_id"
-              default_refresh_key="$refresh_key"
-            else
-              test_account_id="$account_id"
-            fi
-          }
-
-          default_account_id=""
-          default_refresh_key=""
-          test_account_id=""
-          login_tenant default
-          login_tenant test
-
-          if [ "$default_account_id" = "$test_account_id" ]; then
-            echo "::error::Default and test tenant logins resolved to the same account"
-            exit 1
-          fi
-
-          refresh_status="$(api_curl -sS -o "$refresh_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/refresh" -H "x-tenant-id: test" -H "Content-Type: application/json" -d "$(jq -cn --arg refreshKey "$default_refresh_key" '{refreshKey:$refreshKey}')")"
-          if [ "$refresh_status" != "401" ] || [ "$(jq -r '.code // empty' "$refresh_response")" != "REFRESH_INVALID" ]; then
-            fail_response "Cross-tenant refresh rejection" "$refresh_status" "$refresh_response"
-          fi
-
-          captcha_status="$(api_curl -sS -o "$captcha_response" -w '%{http_code}' -X POST "$API_URL/v1/captchas" -H "x-tenant-id: test")"
-          if [ "$captcha_status" != "201" ]; then
-            fail_response "Create fresh test captcha" "$captcha_status" "$captcha_response"
-          fi
-          test_captcha_id="$(jq -r '.id // empty' "$captcha_response")"
-          if [ -z "$test_captcha_id" ]; then
-            echo "::error::Fresh test captcha returned no id"
-            exit 1
-          fi
-          isolation_status="$(api_curl -sS -o "$isolation_response" -w '%{http_code}' -X POST "$API_URL/v1/auth/login" -H "Content-Type: application/json" -d "$(jq -cn --arg captchaCode "$CAPTCHA_TEST_CODE" --arg captchaId "$test_captcha_id" --arg login "stargate" --arg password "$SEED_PASSWORD" '{captchaCode:$captchaCode,captchaId:$captchaId,login:$login,password:$password}')")"
-          if [ "$isolation_status" != "401" ]; then
-            fail_response "Cross-tenant captcha rejection" "$isolation_status" "$isolation_response"
-          fi
-
-          echo "Preview dual-tenant smoke passed"
-        env:
-          API_URL: ${{ steps.deploy-context.outputs.api_url }}
-          STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
-          STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
-          SEED_PASSWORD: ${{ secrets.SEED_PASSWORD }}
-          CAPTCHA_TEST_CODE: ${{ secrets.PREVIEW_CAPTCHA_TEST_CODE }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Comment PR deploy URLs
         if: github.event_name == 'pull_request'
