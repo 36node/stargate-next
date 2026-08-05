@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   Inject,
   Param,
@@ -22,32 +21,18 @@ import type {
 import type { Request } from "express";
 
 import { STARGATE_SERVICE } from "../auth/stargate-service.module";
+import {
+  parsePage,
+  plainObjectBody,
+  requestContext,
+  tenantHeader,
+} from "../platform/request-context";
 
 const BATCH_MAX_IDS = 100;
 const BATCH_MIN_IDS = 1;
-const PAGE_LIMIT_DEFAULT = 10;
-const PAGE_LIMIT_MAX = 100;
 const PATCH_FORBIDDEN_FIELDS = ["password", "idempotencyKey"] as const;
 
 type ApiErrorBody = { code: StargateErrorCode; message: string };
-
-function context(request: Request) {
-  const forwardedFor = request.headers["x-forwarded-for"];
-  return {
-    ip:
-      typeof forwardedFor === "string"
-        ? forwardedFor.split(",")[0]?.trim()
-        : request.ip,
-    requestId:
-      typeof request.headers["x-request-id"] === "string"
-        ? request.headers["x-request-id"]
-        : undefined,
-    userAgent:
-      typeof request.headers["user-agent"] === "string"
-        ? request.headers["user-agent"]
-        : undefined,
-  };
-}
 
 @Controller("v1/accounts")
 export class AccountController {
@@ -61,45 +46,39 @@ export class AccountController {
   }
 
   @Post()
-  create(@Body() body: AccountInput, @Req() request: Request) {
-    this.service.assertApiKey(request.header("x-api-key"));
-    return this.service.createAccount(body, context(request));
+  async create(@Body() rawBody: unknown, @Req() request: Request) {
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    const body = plainObjectBody(rawBody, "BODY_INVALID") as AccountInput;
+    return this.service.createAccount(scope, body, requestContext(request));
   }
 
   @Get()
-  list(
-    @Query("page[offset]") offsetValue: string | undefined,
-    @Query("page[limit]") limitValue: string | undefined,
-    @Headers("x-api-key") apiKey?: string
+  async list(
+    @Query("page[offset]") offsetValue: unknown,
+    @Query("page[limit]") limitValue: unknown,
+    @Req() request: Request
   ) {
-    this.service.assertApiKey(apiKey);
-    const offset = Number(offsetValue ?? "0");
-    const limit = Number(limitValue ?? String(PAGE_LIMIT_DEFAULT));
-    if (
-      !Number.isInteger(offset) ||
-      offset < 0 ||
-      !Number.isInteger(limit) ||
-      limit < 1 ||
-      limit > PAGE_LIMIT_MAX
-    ) {
-      throw new BadRequestException({
-        code: "PAGE_INVALID",
-        message:
-          "page[offset] must be non-negative and page[limit] must be 1..100",
-      } satisfies ApiErrorBody);
-    }
-    return this.service.listAccounts(limit, offset, "/v1/accounts");
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    const { limit, offset } = parsePage(offsetValue, limitValue);
+    return this.service.listAccounts(scope, limit, offset, "/v1/accounts");
   }
 
   @Post("@batchGet")
   @HttpCode(200)
-  batchGet(
-    @Body() body: { accountIds?: unknown },
-    @Headers("x-api-key") apiKey?: string
-  ) {
-    this.service.assertApiKey(apiKey);
+  async batchGet(@Body() rawBody: unknown, @Req() request: Request) {
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    const body = plainObjectBody(rawBody, "BATCH_INVALID");
     if (
-      !Array.isArray(body?.accountIds) ||
+      !Array.isArray(body.accountIds) ||
       body.accountIds.length < BATCH_MIN_IDS ||
       body.accountIds.length > BATCH_MAX_IDS ||
       body.accountIds.some((id) => typeof id !== "string" || !id)
@@ -109,65 +88,76 @@ export class AccountController {
         message: "accountIds must be an array of 1 to 100 non-empty strings",
       } satisfies ApiErrorBody);
     }
-    return this.service.batchGet(body.accountIds);
+    return this.service.batchGet(scope, body.accountIds);
   }
 
   @Get(":accountId")
-  get(
-    @Param("accountId") accountId: string,
-    @Headers("x-api-key") apiKey?: string
-  ) {
-    this.service.assertApiKey(apiKey);
-    return this.service.getAccount(accountId);
+  async get(@Param("accountId") accountId: string, @Req() request: Request) {
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    return this.service.getAccount(scope, accountId);
   }
 
   @Patch(":accountId")
-  patch(
+  async patch(
     @Param("accountId") accountId: string,
-    @Body() body: AccountPatchInput | undefined,
+    @Body() rawBody: unknown,
     @Req() request: Request
   ) {
-    this.service.assertApiKey(request.header("x-api-key"));
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new BadRequestException({
-        code: "PATCH_INVALID",
-        message: "patch body must be a JSON object",
-      } satisfies ApiErrorBody);
-    }
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    const body = plainObjectBody(rawBody, "PATCH_INVALID");
     if (PATCH_FORBIDDEN_FIELDS.some((field) => Object.hasOwn(body, field))) {
       throw new BadRequestException({
         code: "PATCH_INVALID",
         message: "patch body must not contain password or idempotencyKey",
       } satisfies ApiErrorBody);
     }
-    return this.service.patchAccount(accountId, body, context(request));
+    return this.service.patchAccount(
+      scope,
+      accountId,
+      body as AccountPatchInput,
+      requestContext(request)
+    );
   }
 
   @Delete(":accountId")
   @HttpCode(204)
   async delete(@Param("accountId") accountId: string, @Req() request: Request) {
-    this.service.assertApiKey(request.header("x-api-key"));
-    await this.service.deleteAccount(accountId, context(request));
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    await this.service.deleteAccount(scope, accountId, requestContext(request));
   }
 
   @Post(":accountId/password")
   @HttpCode(204)
   async changePassword(
     @Param("accountId") accountId: string,
-    @Body() body: { password?: unknown },
+    @Body() rawBody: unknown,
     @Req() request: Request
   ) {
-    this.service.assertApiKey(request.header("x-api-key"));
-    if (typeof body?.password !== "string" || !body.password.trim()) {
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    const body = plainObjectBody(rawBody, "PASSWORD_INVALID");
+    if (typeof body.password !== "string" || !body.password.trim()) {
       throw new BadRequestException({
         code: "PASSWORD_INVALID",
         message: "password is required",
       } satisfies ApiErrorBody);
     }
     await this.service.changePassword(
+      scope,
       accountId,
       body.password,
-      context(request)
+      requestContext(request)
     );
   }
 }

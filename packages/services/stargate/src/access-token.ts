@@ -8,13 +8,15 @@ export const ACCESS_TOKEN_INVALID_MESSAGE = "access token is invalid";
 
 const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
 const HEADER_KEYS = ["alg", "typ"];
-const PAYLOAD_KEYS = ["exp", "iat", "sid", "sub", "type"];
+const PAYLOAD_KEYS = ["exp", "iat", "sid", "sub", "tid", "type"];
+const LEGACY_PAYLOAD_KEYS = ["exp", "iat", "sid", "sub", "type"];
 
 export type AccessTokenSignOptions = {
   accountId: string;
   now?: number;
   secret: string;
   sessionId: string;
+  tenantId: string;
   ttlSeconds: number;
 };
 
@@ -30,6 +32,10 @@ export type AccessTokenVerifyOptions = {
 };
 
 type JsonObject = Record<string, unknown>;
+type ParsedAccessTokenClaims = AccessTokenClaims & {
+  expiresAtSeconds: number;
+  issuedAtSeconds: number;
+};
 
 function invalidAccessToken(): never {
   throw serviceError(
@@ -67,6 +73,47 @@ function hasExactKeys(value: JsonObject, keys: string[]): boolean {
   );
 }
 
+function claimsFromPayload(
+  payload: JsonObject
+): ParsedAccessTokenClaims | null {
+  const isCurrent = hasExactKeys(payload, PAYLOAD_KEYS);
+  // TODO(cleanup-ticket: Ticket #232 follow-up): 临时兼容升级前签发的五 claims Access Token。
+  // 可安全删除的时间 = 最后一个旧版本签发实例退出服务的时间
+  //                  + ACCESS_TOKEN_TTL_SECONDS + JWT_CLOCK_TOLERANCE_SECONDS。
+  // 最后旧实例退出时间：以 Ticket #232 生产发布完成记录的时间戳为准。
+  const isLegacy = !isCurrent && hasExactKeys(payload, LEGACY_PAYLOAD_KEYS);
+  if (!(isCurrent || isLegacy) || payload.type !== "access") {
+    return null;
+  }
+  if (
+    typeof payload.sub !== "string" ||
+    payload.sub.length === 0 ||
+    typeof payload.sid !== "string" ||
+    payload.sid.length === 0
+  ) {
+    return null;
+  }
+  if (
+    isCurrent &&
+    (typeof payload.tid !== "string" || payload.tid.length === 0)
+  ) {
+    return null;
+  }
+  if (
+    !(Number.isSafeInteger(payload.iat) && Number.isSafeInteger(payload.exp)) ||
+    (payload.exp as number) <= (payload.iat as number)
+  ) {
+    return null;
+  }
+  return {
+    accountId: payload.sub,
+    expiresAtSeconds: payload.exp as number,
+    issuedAtSeconds: payload.iat as number,
+    sessionId: payload.sid,
+    tenantId: isCurrent ? (payload.tid as string) : "default",
+  };
+}
+
 export function signAccessToken(
   options: AccessTokenSignOptions
 ): SignedAccessToken {
@@ -81,6 +128,7 @@ export function signAccessToken(
       iat: issuedAt,
       sid: options.sessionId,
       sub: options.accountId,
+      tid: options.tenantId,
       type: "access",
     })
   ).toString("base64url");
@@ -127,28 +175,19 @@ export function verifyAccessToken(
     invalidAccessToken();
   }
 
-  const payload = parseObject(payloadSegment);
-  if (
-    !hasExactKeys(payload, PAYLOAD_KEYS) ||
-    typeof payload.sub !== "string" ||
-    payload.sub.length === 0 ||
-    typeof payload.sid !== "string" ||
-    payload.sid.length === 0 ||
-    payload.type !== "access" ||
-    !Number.isSafeInteger(payload.iat) ||
-    !Number.isSafeInteger(payload.exp) ||
-    (payload.exp as number) <= (payload.iat as number)
-  ) {
+  const claims = claimsFromPayload(parseObject(payloadSegment));
+  if (!claims) {
     invalidAccessToken();
   }
 
   const nowSeconds = Math.floor((options.now ?? Date.now()) / 1000);
-  if (nowSeconds >= (payload.exp as number) + options.clockToleranceSeconds) {
+  if (nowSeconds >= claims.expiresAtSeconds + options.clockToleranceSeconds) {
     invalidAccessToken();
   }
   return {
-    accountId: payload.sub,
-    sessionId: payload.sid,
+    accountId: claims.accountId,
+    sessionId: claims.sessionId,
+    tenantId: claims.tenantId,
   };
 }
 

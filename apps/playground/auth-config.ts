@@ -1,5 +1,15 @@
 /** 集中管理认证后端派生的 Cookie 名与 JWT 容差。 */
 export const STARGATE_AUTH_BACKEND_DEFAULT = "next";
+export const nextTenantOptions = ["default", "test"] as const;
+export type NextTenantId = (typeof nextTenantOptions)[number];
+export const defaultTenantId: NextTenantId = "default";
+
+export function resolveTenantId(value: unknown): NextTenantId {
+  return typeof value === "string" &&
+    nextTenantOptions.includes(value as NextTenantId)
+    ? (value as NextTenantId)
+    : defaultTenantId;
+}
 
 export function isNextBackend(backend: string | undefined): boolean {
   return (backend ?? STARGATE_AUTH_BACKEND_DEFAULT) === "next";
@@ -7,6 +17,7 @@ export function isNextBackend(backend: string | undefined): boolean {
 
 export const nextSessionCookieNames = {
   refresh: "s-next-refresh",
+  tenant: "s-next-tenant",
   token: "s-next-token",
 } as const;
 
@@ -15,7 +26,11 @@ export const legacySessionCookieNames = {
   token: "s-token",
 } as const;
 
-export function resolveSessionCookieNames(backend: string | undefined) {
+export function resolveSessionCookieNames(backend: string | undefined): {
+  refresh: string;
+  tenant?: string;
+  token: string;
+} {
   return isNextBackend(backend)
     ? nextSessionCookieNames
     : legacySessionCookieNames;

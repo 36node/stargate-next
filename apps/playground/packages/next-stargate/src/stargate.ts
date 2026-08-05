@@ -12,6 +12,7 @@ import {
   defaultSessionCookieNames,
   getRefreshTokenFromCookie,
   getSessionTokenFromCookie,
+  getTenantFromCookie,
   type SessionCookieNames,
   setSessionCookies,
 } from "./cookie";
@@ -30,6 +31,10 @@ import type {
 } from "./types";
 
 type ResolvedKey = { key: JoseCryptoKey | Uint8Array; algorithms: string[] };
+type CookieSessionResult =
+  | { kind: "valid"; session: Session }
+  | { kind: "absent" }
+  | { kind: "tenant_mismatch" };
 
 export function isCookieSecure(
   configuredSecure: boolean | undefined,
@@ -102,11 +107,11 @@ export function NextStargate({
   }
 
   async function signInWithCredentials(
-    { captchaCode, captchaId, login, password }: SignInCredential,
+    { captchaCode, captchaId, login, password, tenantId }: SignInCredential,
     state?: SignInState
   ) {
     const res = await auth.login({
-      body: { captchaCode, captchaId, login, password },
+      body: { captchaCode, captchaId, login, password, tenantId },
     });
     await setSessionCookies(
       res.data,
@@ -164,6 +169,7 @@ export function NextStargate({
         const payload = await verifyToken(authHeader.substring(7));
         return {
           id: payload.sid,
+          tenantId: payload.tid ?? "default",
           subject: payload.sub,
           source: payload.source,
           ns: payload.ns,
@@ -187,48 +193,74 @@ export function NextStargate({
     return;
   }
 
-  async function loadSessionFromCookie(): Promise<Session | undefined> {
+  async function loadSessionFromCookie(
+    response?: NextResponse
+  ): Promise<CookieSessionResult> {
     const token = await getSessionTokenFromCookie(cookieNames.token);
     if (!token) {
-      return;
+      return { kind: "absent" };
     }
 
+    let payload: TokenPayload;
     try {
-      const payload = await verifyToken(token);
-      return {
+      payload = await verifyToken(token);
+    } catch {
+      return { kind: "absent" };
+    }
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) {
+      return { kind: "absent" };
+    }
+
+    const tokenTenant = payload.tid ?? "default";
+    const tokenExpiresAt = new Date(payload.exp * 1000);
+    const rawTenantCookie = await getTenantFromCookie(cookieNames.tenant);
+    const cookieTenant = rawTenantCookie ?? "default";
+    if (tokenTenant !== cookieTenant) {
+      response?.cookies.delete(cookieNames.token);
+      response?.cookies.delete(cookieNames.refresh);
+      return { kind: "tenant_mismatch" };
+    }
+    if (cookieNames.tenant && !rawTenantCookie && response) {
+      response.cookies.set(cookieNames.tenant, tokenTenant, {
+        secure: await resolveCookieSecure(),
+        expires: tokenExpiresAt,
+        ...CookieOptions,
+      });
+    }
+    return {
+      kind: "valid",
+      session: {
         id: payload.sid,
+        tenantId: tokenTenant,
         subject: payload.sub,
         source: payload.source,
         ns: payload.ns,
         permissions: payload.permissions,
         type: payload.type,
         roles: payload.roles,
-      };
-    } catch {
-      return;
-    }
+      },
+    };
   }
 
   async function loadSession(
     response?: NextResponse
   ): Promise<Session | undefined> {
-    let session: Session | undefined;
-
     try {
-      session = await loadSessionFromHeader();
-
-      if (!session) {
-        session = await loadSessionFromCookie();
+      const headerSession = await loadSessionFromHeader();
+      if (headerSession) {
+        return headerSession;
       }
-
-      if (!session) {
-        session = await refreshSession(response);
+      const cookieResult = await loadSessionFromCookie(response);
+      if (cookieResult.kind === "valid") {
+        return cookieResult.session;
       }
+      if (cookieResult.kind === "tenant_mismatch") {
+        return;
+      }
+      return await refreshSession(response);
     } catch {
       return;
     }
-
-    return session;
   }
 
   async function refreshSession(
@@ -238,11 +270,13 @@ export function NextStargate({
     if (!refreshToken) {
       return;
     }
+    const tenantId =
+      (await getTenantFromCookie(cookieNames.tenant)) ?? "default";
 
     let res: AuthRefreshResponse;
     try {
       res = await auth.refresh({
-        body: { refreshToken },
+        body: { refreshToken, tenantId },
       });
     } catch {
       if (response) {
@@ -264,6 +298,17 @@ export function NextStargate({
         expires: res.data.expireAt,
         ...CookieOptions,
       });
+      if (cookieNames.tenant) {
+        response.cookies.set(
+          cookieNames.tenant,
+          res.data.tenantId ?? tenantId,
+          {
+            secure,
+            expires: res.data.expireAt,
+            ...CookieOptions,
+          }
+        );
+      }
     }
 
     return res.data;
@@ -276,6 +321,7 @@ export function NextStargate({
         await auth.logout({
           body: {
             sid: session.id,
+            tenantId: session.tenantId,
             token: await getSessionTokenFromCookie(cookieNames.token),
           },
         });

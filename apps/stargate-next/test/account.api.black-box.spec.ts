@@ -8,6 +8,7 @@ type Account = {
   email: string | null;
   id: string;
   phone: string | null;
+  tenantId: string;
   updatedAt: string;
   username: string;
 };
@@ -26,6 +27,7 @@ const accountKeys = [
   "email",
   "id",
   "phone",
+  "tenantId",
   "updatedAt",
   "username",
 ];
@@ -46,7 +48,7 @@ function uniquePhone(sequence: number): string {
   return `+861${Date.now()}${sequence}`;
 }
 
-function createAccount(input: Record<string, unknown>, service = true) {
+function createAccount(input: unknown, service = true) {
   return request("/v1/accounts", "POST", { body: input, service });
 }
 
@@ -75,6 +77,7 @@ describe("Account management API", () => {
       active: true,
       email,
       phone,
+      tenantId: "default",
       username: normalizedUsername,
     });
     expect(JSON.stringify(account)).not.toContain(password);
@@ -99,6 +102,9 @@ describe("Account management API", () => {
     ] as const;
     for (const [body, code] of invalidCases) {
       expectError(await createAccount(body), 400, code);
+    }
+    for (const body of [null, [], "invalid"]) {
+      expectError(await createAccount(body), 400, "BODY_INVALID");
     }
 
     const conflictCases = [
@@ -211,6 +217,9 @@ describe("Account management API", () => {
     }
 
     const invalidBatches = [
+      null,
+      [],
+      "invalid",
       { accountIds: "not-an-array" },
       { accountIds: [] },
       { accountIds: Array.from({ length: 101 }, (_, index) => `id-${index}`) },
@@ -361,6 +370,16 @@ describe("Account management API", () => {
       400,
       "PATCH_INVALID"
     );
+    for (const body of [null, "invalid"]) {
+      expectError(
+        await request(`/v1/accounts/${account.id}`, "PATCH", {
+          body,
+          service: true,
+        }),
+        400,
+        "PATCH_INVALID"
+      );
+    }
     expectError(
       await request(`/v1/accounts/${account.id}`, "PATCH", {
         body: { password: "unauthorized-password" },
@@ -477,6 +496,16 @@ describe("Account management API", () => {
       400,
       "PASSWORD_INVALID"
     );
+    for (const body of [null, [], "invalid"]) {
+      expectError(
+        await request(`/v1/accounts/${account.id}/password`, "POST", {
+          body,
+          service: true,
+        }),
+        400,
+        "PASSWORD_INVALID"
+      );
+    }
     expectError(
       await request(`/v1/accounts/${account.id}/password`, "POST", {
         body: {},
@@ -559,6 +588,22 @@ describe("Account management API", () => {
       }),
       401,
       "REFRESH_INVALID"
+    );
+
+    const missingAccountId = `missing-${uniqueUsername()}`;
+    expectError(
+      await request(`/v1/accounts/${missingAccountId}`, "DELETE", {
+        service: true,
+      }),
+      404,
+      "ACCOUNT_NOT_FOUND"
+    );
+    expectError(
+      await request(`/v1/accounts/${missingAccountId}/sessions`, "DELETE", {
+        service: true,
+      }),
+      404,
+      "ACCOUNT_NOT_FOUND"
     );
   });
 });

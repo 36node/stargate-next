@@ -1,5 +1,11 @@
 import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { cookies } from "next/headers";
 
+import {
+  nextTenantOptions,
+  resolveTenantId,
+  sessionCookieNames,
+} from "@/auth-config";
 import { env } from "@/packages/services/env";
 import { authBackendLabel } from "../../../auth-backend";
 import { LoginForm } from "./login-form";
@@ -11,6 +17,11 @@ export default async function SignInPage({
 }) {
   const { from } = await searchParams;
   const captchaEnabled = env.STARGATE_AUTH_BACKEND === "next";
+  const initialTenant = resolveTenantId(
+    sessionCookieNames.tenant
+      ? (await cookies()).get(sessionCookieNames.tenant)?.value
+      : undefined
+  );
   let defaultCaptcha:
     | Awaited<ReturnType<StargateNextClient["createCaptcha"]>>
     | undefined;
@@ -18,7 +29,7 @@ export default async function SignInPage({
     try {
       defaultCaptcha = await new StargateNextClient(env.STARGATE_ENDPOINT, {
         apiKey: env.STARGATE_API_KEY,
-      }).createCaptcha();
+      }).createCaptcha(initialTenant);
     } catch {
       defaultCaptcha = undefined;
     }
@@ -33,6 +44,8 @@ export default async function SignInPage({
         captchaEnabled={captchaEnabled}
         defaultCaptcha={defaultCaptcha}
         from={from}
+        initialTenant={initialTenant}
+        tenantOptions={nextTenantOptions}
       />
     </div>
   );

@@ -1,10 +1,8 @@
 /** 生成 SDK 的认证消费契约与稳定错误映射黑盒回归。 */
+
+import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
-import {
-  StargateApiError,
-  StargateNextClient,
-} from "../../../packages/stargate-next-sdk/src";
 import { env, uniqueUsername } from "./support/black-box";
 
 const endpoint = env("STARGATE_ENDPOINT");

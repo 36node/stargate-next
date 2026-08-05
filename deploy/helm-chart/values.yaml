@@ -31,11 +31,10 @@ stargateNext:
     captchaCreateWindowSeconds: "60"
     loginMaxAttempts: "5"
     loginLockSeconds: "60"
-    captchaTestMode: false
-    captchaTestCode: ""
   secrets:
     databaseUrl: ""
     redisUrl: ""
+    stargateAdminApiKey: ""
     stargateApiKey: ""
     stargateJwtSecret: ""
     captchaHmacSecret: ""
@@ -43,6 +42,10 @@ stargateNext:
     refreshKeyHmacPrimarySecret: ""
     refreshKeyHmacSecondaryKeyId: ""
     refreshKeyHmacSecondarySecret: ""
+    tenantApiKeyHmacPrimaryKeyId: ""
+    tenantApiKeyHmacPrimarySecret: ""
+    tenantApiKeyHmacSecondaryKeyId: ""
+    tenantApiKeyHmacSecondarySecret: ""
   resources: {}
   podAnnotations: {}
   nodeSelector: {}

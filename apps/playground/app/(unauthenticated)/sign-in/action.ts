@@ -2,6 +2,7 @@
 
 import { StargateApiError } from "@repo/stargate-next-sdk";
 
+import { resolveTenantId } from "@/auth-config";
 import { signIn } from "../../../stargate";
 
 export type LoginState = { error?: string };
@@ -42,6 +43,7 @@ export async function loginAction(
   const captchaId = formData.get("captchaId");
   const captchaCode = formData.get("captchaCode");
   const from = formData.get("from");
+  const tenantId = resolveTenantId(formData.get("tenantId"));
 
   if (typeof login !== "string" || typeof password !== "string") {
     return { error: "请输入账号和密码。" };
@@ -54,6 +56,7 @@ export async function loginAction(
         captchaId: typeof captchaId === "string" ? captchaId : undefined,
         login,
         password,
+        tenantId,
       },
       { from: typeof from === "string" && from.startsWith("/") ? from : "/" }
     );

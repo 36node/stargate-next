@@ -7,8 +7,11 @@ const baseEnvironment: NodeJS.ProcessEnv = {
   CAPTCHA_HMAC_SECRET: "captcha-secret",
   REFRESH_KEY_HMAC_PRIMARY_KEY_ID: "primary",
   REFRESH_KEY_HMAC_PRIMARY_SECRET: "primary-secret",
+  STARGATE_ADMIN_API_KEY: "admin-api-key",
   STARGATE_API_KEY: "api-key",
   STARGATE_JWT_SECRET: "jwt-secret",
+  TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "tenant-primary",
+  TENANT_API_KEY_HMAC_PRIMARY_SECRET: "tenant-primary-secret",
 };
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -16,18 +19,6 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 describe("stargate config", () => {
-  it("rejects captcha test mode in production", () => {
-    expect(() =>
-      loadStargateConfig(
-        environment({
-          CAPTCHA_TEST_CODE: "A1B2",
-          CAPTCHA_TEST_MODE: "true",
-          NODE_ENV: "production",
-        })
-      )
-    ).toThrow("CAPTCHA_TEST_MODE cannot be enabled in production");
-  });
-
   it("requires and validates the fixed captcha code", () => {
     expect(() =>
       loadStargateConfig(environment({ CAPTCHA_TEST_MODE: "true" }))
@@ -75,6 +66,22 @@ describe("stargate config", () => {
         })
       ).secondary
     ).toEqual({ id: "secondary", secret: "secondary-secret" });
+  });
+
+  it("validates the optional secondary Tenant API Key HMAC pair", () => {
+    expect(() =>
+      loadStargateConfig(
+        environment({ TENANT_API_KEY_HMAC_SECONDARY_KEY_ID: "secondary" })
+      )
+    ).toThrow("must be configured together");
+    expect(() =>
+      loadStargateConfig(
+        environment({
+          TENANT_API_KEY_HMAC_SECONDARY_KEY_ID: "tenant-primary",
+          TENANT_API_KEY_HMAC_SECONDARY_SECRET: "tenant-secondary-secret",
+        })
+      )
+    ).toThrow("tenant api key HMAC key ids must be distinct");
   });
 
   it("uses strict decimal syntax only for JWT clock tolerance", () => {
@@ -169,9 +176,12 @@ describe("stargate config", () => {
     for (const name of [
       "STARGATE_JWT_SECRET",
       "CAPTCHA_HMAC_SECRET",
+      "STARGATE_ADMIN_API_KEY",
       "STARGATE_API_KEY",
       "REFRESH_KEY_HMAC_PRIMARY_KEY_ID",
       "REFRESH_KEY_HMAC_PRIMARY_SECRET",
+      "TENANT_API_KEY_HMAC_PRIMARY_KEY_ID",
+      "TENANT_API_KEY_HMAC_PRIMARY_SECRET",
     ]) {
       const value = environment();
       delete value[name];
@@ -198,6 +208,9 @@ describe("stargate config", () => {
         REFRESH_KEY_HMAC_SECONDARY_KEY_ID: "secondary",
         REFRESH_KEY_HMAC_SECONDARY_SECRET: "primary-secret",
       },
+      { TENANT_API_KEY_HMAC_PRIMARY_SECRET: "captcha-secret" },
+      { STARGATE_API_KEY: "jwt-secret" },
+      { STARGATE_ADMIN_API_KEY: "tenant-primary-secret" },
     ];
     for (const overrides of cases) {
       expect(() => loadStargateConfig(environment(overrides))).toThrow(

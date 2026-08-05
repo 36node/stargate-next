@@ -44,12 +44,14 @@ function nextSession(tokens: {
   refreshExpiresAt: string;
   refreshKey: string;
   sessionId: string;
+  tenantId: string;
 }): SessionWithToken {
   return {
     expireAt: new Date(tokens.refreshExpiresAt),
     id: tokens.sessionId,
     key: tokens.refreshKey,
     subject: tokens.accountId,
+    tenantId: tokens.tenantId,
     token: tokens.accessToken,
     tokenExpireAt: new Date(tokens.accessTokenExpiresAt),
     type: "access",
@@ -73,7 +75,8 @@ function resolveAuth(): AuthService {
         body.login,
         body.password,
         body.captchaId,
-        body.captchaCode
+        body.captchaCode,
+        body.tenantId
       );
       return {
         data: nextSession(data),
@@ -83,11 +86,11 @@ function resolveAuth(): AuthService {
     },
     async logout({ body }) {
       if (body.token) {
-        await client.logout(body.token);
+        await client.logout(body.token, body.tenantId);
       }
     },
     async refresh({ body }) {
-      const data = await client.refresh(body.refreshToken);
+      const data = await client.refresh(body.refreshToken, body.tenantId);
       return {
         data: nextSession(data),
         request: new Request(env.STARGATE_ENDPOINT),

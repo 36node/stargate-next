@@ -12,6 +12,7 @@ type Tokens = {
   accountId: string;
   refreshKey: string;
   sessionId: string;
+  tenantId: string;
 };
 
 const captchaCode = env("CAPTCHA_TEST_CODE").trim().toUpperCase();
@@ -120,8 +121,11 @@ describe("authentication API", () => {
       "iat",
       "sid",
       "sub",
+      "tid",
       "type",
     ]);
+    expect(payload.tid).toBe("default");
+    expect(tokens.tenantId).toBe("default");
     expect(new Date(tokens.accessTokenExpiresAt).getTime() / 1000).toBe(
       payload.exp
     );

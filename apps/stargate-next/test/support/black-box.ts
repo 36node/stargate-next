@@ -13,23 +13,35 @@ export async function request(
   method: string,
   options: {
     accessToken?: string;
+    adminKey?: boolean;
     apiKey?: string;
     authorization?: string;
     body?: unknown;
     forwardedFor?: string;
     service?: boolean;
+    tenantId?: string;
+    tenantIdHeader?: string | null;
   } = {}
 ) {
   const {
     accessToken,
+    adminKey = false,
     apiKey,
     authorization,
     body,
     forwardedFor,
     service = false,
+    tenantId,
+    tenantIdHeader,
   } = options;
-  const serviceApiKey =
-    apiKey === undefined && service ? env("STARGATE_API_KEY") : apiKey;
+  let resolvedApiKey = apiKey;
+  if (resolvedApiKey === undefined && adminKey) {
+    resolvedApiKey = env("STARGATE_ADMIN_API_KEY");
+  } else if (resolvedApiKey === undefined && service) {
+    resolvedApiKey = env("STARGATE_API_KEY");
+  }
+  const resolvedTenantHeader =
+    tenantIdHeader === undefined ? tenantId : (tenantIdHeader ?? "");
   let authorizationHeader: string | undefined;
   if (authorization !== undefined) {
     authorizationHeader = authorization;
@@ -40,11 +52,14 @@ export async function request(
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json" }),
-      ...(serviceApiKey === undefined ? {} : { "x-api-key": serviceApiKey }),
+      ...(resolvedApiKey === undefined ? {} : { "x-api-key": resolvedApiKey }),
       ...(authorizationHeader !== undefined
         ? { authorization: authorizationHeader }
         : {}),
       ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
+      ...(resolvedTenantHeader === undefined
+        ? {}
+        : { "x-tenant-id": resolvedTenantHeader }),
     },
     method,
   });
@@ -57,9 +72,13 @@ export async function request(
 export async function login(
   loginValue: string,
   password: string,
-  forwardedFor?: string
+  forwardedFor?: string,
+  tenantId?: string
 ) {
-  const captcha = await request("/v1/captchas", "POST", { forwardedFor });
+  const captcha = await request("/v1/captchas", "POST", {
+    forwardedFor,
+    tenantId,
+  });
   if (captcha.status !== 201) {
     throw new Error(`captcha creation failed with status ${captcha.status}`);
   }
@@ -71,6 +90,7 @@ export async function login(
       password,
     },
     forwardedFor,
+    tenantId,
   });
 }
 

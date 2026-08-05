@@ -4,6 +4,7 @@ import Link from "next/link";
 import { auth } from "@/packages/services/auth/client";
 import { env } from "@/packages/services/env";
 import { authBackendLabel } from "../../../auth-backend";
+import { ensureSession } from "../../../stargate";
 import {
   AccountActions,
   AccountStatusSwitch,
@@ -33,6 +34,7 @@ type AccountsPageProps = {
 export default async function AccountsPage({
   searchParams,
 }: AccountsPageProps) {
+  const session = await ensureSession();
   try {
     const requestedPage = pageNumber((await searchParams).page);
     const offset = (requestedPage - 1) * PAGE_SIZE;
@@ -62,6 +64,16 @@ export default async function AccountsPage({
           <div>
             <p className="eyebrow">{authBackendLabel}</p>
             <h1>账号管理</h1>
+            {env.STARGATE_AUTH_BACKEND === "next" ? (
+              <>
+                <p>当前管理：default 租户</p>
+                {session.tenantId && session.tenantId !== "default" ? (
+                  <p>
+                    当前登录租户为 {session.tenantId}；本页不管理该租户账号。
+                  </p>
+                ) : null}
+              </>
+            ) : null}
           </div>
           <div className="page-heading-actions">
             <p>查看并管理登录账号。</p>

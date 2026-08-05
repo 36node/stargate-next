@@ -107,7 +107,12 @@ jobs:
         run: |
           pnpm db:migrate
           pnpm db:migrate
+          pnpm --filter stargate-next seed:default-tenant
           pnpm --filter stargate-next seed:legacy-fixture
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
+      - name: Verify multi-tenant backfill migration
+        run: pnpm --filter @repo/db verify:backfill
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
       - name: Code check
@@ -116,6 +121,8 @@ jobs:
         run: |
           ! rg -n '@repo/(db|redis)' apps/stargate-next --glob '*.ts'
           ! rg -n '@(repo/db|repo/redis|prisma|nestjs)/' packages/services/stargate/src/contracts.ts
+          ! rg -n 'as unknown as TenantScope|as TenantScope' --glob '*.ts' | rg -v '^packages/services/stargate/src/service\.ts:'
+          ! rg -n 'as unknown as AdminScope|as AdminScope' --glob '*.ts' | rg -v '^packages/services/stargate/src/service\.ts:'
       - name: Verify OpenAPI SDK snapshot
         run: |
           pnpm sdk:generate
@@ -158,6 +165,7 @@ jobs:
           CAPTCHA_TEST_MODE: "true"
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
           NODE_ENV: test
+          STARGATE_ADMIN_API_KEY: ci-admin-api-key
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379
           REDIS_KEY_PREFIX: "stargate-next:ci-${{ github.run_id }}:"
@@ -165,6 +173,8 @@ jobs:
           REFRESH_KEY_HMAC_PRIMARY_SECRET: ci-primary-secret
           STARGATE_API_KEY: ci-service-api-key
           STARGATE_ENDPOINT: http://127.0.0.1:9527
+          TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: ci-tenant-key-primary
+          TENANT_API_KEY_HMAC_PRIMARY_SECRET: ci-tenant-key-primary-secret
 
       - name: Build application artifacts
         if: github.actor != 'dependabot[bot]'
@@ -333,8 +343,17 @@ jobs:
   build-helm-chart:
     name: Build Helm chart
     runs-on: arc-runners-mekong
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    if: >-
+      ${{
+        github.event_name == 'pull_request' ||
+        (
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        )
+      }}
     timeout-minutes: 15
+    outputs:
+      chart_version: ${{ steps.chart-version.outputs.chart_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -382,8 +401,21 @@ jobs:
 
           echo "chart_sha=${chart_sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Lint Helm chart
-        run: helm lint deploy/helm-chart
+      - name: Resolve chart version
+        id: chart-version
+        env:
+          CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            chart_version="0.0.0-pr-${PR_NUMBER}-${CHART_SHA}"
+          else
+            chart_version="0.0.0-main"
+          fi
+
+          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
 
       - name: Package and push Helm chart
         run: |
@@ -391,19 +423,21 @@ jobs:
 
           chart_dir="deploy/helm-chart"
           destination="${RUNNER_TEMP}/helm-chart"
-          branch_version="0.0.0-main"
           fingerprint_version="0.0.0-input-${CHART_SHA}"
           repository="oci://${HARBOR_DOMAIN}/${HARBOR_PROJECT}"
 
           mkdir -p "$destination"
 
-          helm package "$chart_dir" --version "$branch_version" --destination "$destination"
-          helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
+          helm package "$chart_dir" --version "$CHART_VERSION" --destination "$destination"
+          helm push "${destination}/stargate-chart-${CHART_VERSION}.tgz" "$repository"
 
-          helm push "${destination}/stargate-chart-${branch_version}.tgz" "$repository"
-          helm push "${destination}/stargate-chart-${fingerprint_version}.tgz" "$repository"
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            helm package "$chart_dir" --version "$fingerprint_version" --destination "$destination"
+            helm push "${destination}/stargate-chart-${fingerprint_version}.tgz" "$repository"
+          fi
         env:
           CHART_SHA: ${{ steps.chart-fingerprint.outputs.chart_sha }}
+          CHART_VERSION: ${{ steps.chart-version.outputs.chart_version }}
 
   deploy:
     name: Deploy
@@ -420,10 +454,7 @@ jobs:
           )
         ) &&
         needs['test-and-build'].result == 'success' &&
-        (
-          github.event_name == 'pull_request' ||
-          needs['build-helm-chart'].result == 'success'
-        )
+        needs['build-helm-chart'].result == 'success'
       }}
     runs-on: arc-runners-mekong
     timeout-minutes: 30
@@ -560,6 +591,7 @@ jobs:
           STARGATE_NEXT_TAG: ${{ steps.deploy-images.outputs.stargate_next_tag }}
           PLAYGROUND_TAG: ${{ steps.deploy-images.outputs.playground_tag }}
           DB_TAG: ${{ steps.deploy-images.outputs.db_tag }}
+          STARGATE_CHART_VERSION: ${{ needs.build-helm-chart.outputs.chart_version }}
         run: |
           set -euo pipefail
 
@@ -588,11 +620,13 @@ jobs:
             --arg stargate_next "$STARGATE_NEXT_TAG" \
             --arg playground "$PLAYGROUND_TAG" \
             --arg db "$DB_TAG" \
+            --arg chart_version "$STARGATE_CHART_VERSION" \
             '{
               overrides: {
                 stargate_next_tag: $stargate_next,
                 stargate_next_playground_tag: $playground,
-                stargate_next_db_tag: $db
+                stargate_next_db_tag: $db,
+                stargate_next_chart_version: $chart_version
               }
             }' > /tmp/deploy-overrides.json
 
@@ -643,15 +677,28 @@ jobs:
             fail "Deploy task $task_id finished with status: ${status:-unknown}"
           fi
 
-      - name: Seed init account
+      - name: Seed tenants and init accounts
         if: ${{ steps.deploy.outputs.outcome == 'success' }}
         run: |
           set -euo pipefail
 
-          if [ -z "$STARGATE_API_KEY" ]; then
-            echo "::error::STARGATE_API_KEY secret is required for seed"
-            exit 1
-          fi
+          require_secret() {
+            name="$1"
+            value="$2"
+            if [ -z "$value" ]; then
+              echo "::error::$name is required for seed"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+          }
+
+          api_curl() {
+            curl --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-delay 2 "$@"
+          }
+
+          require_secret STARGATE_API_KEY "$STARGATE_API_KEY"
+          require_secret STARGATE_ADMIN_API_KEY "$STARGATE_ADMIN_API_KEY"
+          SEED_PASSWORD="stargate@36node"
 
           API_URL="${{ steps.deploy-context.outputs.api_url }}"
           echo "Waiting for API to be ready at $API_URL/health/ready"
@@ -667,24 +714,141 @@ jobs:
             exit 1
           fi
 
-          echo "Creating init account (username=stargate)..."
-          suffix="$(date +%s)"
-          http_code="$(curl -sS -o /tmp/seed-response.json -w '%{http_code}' \
-            -X POST "$API_URL/v1/accounts" \
-            -H "x-api-key: $STARGATE_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"idempotencyKey\":\"seed-stargate-${suffix}\",\"password\":\"stargate@36node\",\"username\":\"stargate\"}")"
+          ensure_tenant() {
+            response_file="$(mktemp)"
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/tenants" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"id":"test","name":"test"}')"
+            if [ "$status" = "201" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$status" != "409" ] || [ "$(jq -r '.code // empty' "$response_file")" != "TENANT_ALREADY_EXISTS" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Ensure test tenant failed with HTTP $status"
+              exit 1
+            fi
 
-          if [ "$http_code" = "201" ] || [ "$http_code" = "200" ]; then
-            echo "Init account created (HTTP $http_code)"
-          elif [ "$http_code" = "409" ]; then
-            echo "Init account already exists, skipping (HTTP $http_code)"
-          else
-            cat /tmp/seed-response.json
-            echo "::error::Create account failed with HTTP $http_code"
-            exit 1
-          fi
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              "$API_URL/v1/tenants/test" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY")"
+            if [ "$status" != "200" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Read test tenant failed with HTTP $status"
+              exit 1
+            fi
+            tenant_status="$(jq -r '.status // empty' "$response_file")"
+            if [ "$tenant_status" = "active" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$tenant_status" != "disabled" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Unexpected test tenant status: $tenant_status"
+              exit 1
+            fi
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              -X PATCH "$API_URL/v1/tenants/test" \
+              -H "x-api-key: $STARGATE_ADMIN_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{"status":"active"}')"
+            if [ "$status" != "200" ] || [ "$(jq -r '.status // empty' "$response_file")" != "active" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Enable test tenant failed with HTTP $status"
+              exit 1
+            fi
+            rm -f "$response_file"
+          }
+
+          ensure_account() {
+            tenant="$1"
+            key="$2"
+            include_tenant_header="$3"
+            response_file="$(mktemp)"
+            tenant_args=()
+            if [ "$include_tenant_header" = "true" ]; then
+              tenant_args=(-H "x-tenant-id: $tenant")
+            fi
+            payload="$(jq -cn --arg password "$SEED_PASSWORD" '{active:true,password:$password,username:"stargate"}')"
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/accounts" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d "$payload")"
+            if [ "$status" = "201" ]; then
+              rm -f "$response_file"
+              return
+            fi
+            if [ "$status" != "409" ] || [ "$(jq -r '.code // empty' "$response_file")" != "ACCOUNT_IDENTIFIER_CONFLICT" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Ensure $tenant account failed with HTTP $status"
+              exit 1
+            fi
+
+            account_id=""
+            for page in $(seq 0 19); do
+              offset="$((page * 100))"
+              status="$(api_curl --globoff -sS -o "$response_file" -w '%{http_code}' \
+                "$API_URL/v1/accounts?page[offset]=$offset&page[limit]=100" \
+                -H "x-api-key: $key" \
+                "${tenant_args[@]}")"
+              if [ "$status" != "200" ]; then
+                cat "$response_file"
+                rm -f "$response_file"
+                echo "::error::List $tenant accounts failed with HTTP $status"
+                exit 1
+              fi
+              account_id="$(jq -r '.data[] | select(.attributes.username == "stargate") | .id' "$response_file" | head -n 1)"
+              [ -n "$account_id" ] && break
+              [ "$(jq -r '.links.next // empty' "$response_file")" = "" ] && break
+            done
+            if [ -z "$account_id" ]; then
+              rm -f "$response_file"
+              echo "::error::Existing stargate account was not found in $tenant"
+              exit 1
+            fi
+
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              -X PATCH "$API_URL/v1/accounts/$account_id" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d '{"active":true}')"
+            if [ "$status" != "200" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Enable $tenant account failed with HTTP $status"
+              exit 1
+            fi
+            status="$(api_curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST "$API_URL/v1/accounts/$account_id/password" \
+              -H "x-api-key: $key" \
+              "${tenant_args[@]}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -cn --arg password "$SEED_PASSWORD" '{password:$password}')")"
+            if [ "$status" != "204" ]; then
+              cat "$response_file"
+              rm -f "$response_file"
+              echo "::error::Reset $tenant account password failed with HTTP $status"
+              exit 1
+            fi
+            rm -f "$response_file"
+          }
+
+          ensure_tenant
+          ensure_account default "$STARGATE_API_KEY" false
+          ensure_account test "$STARGATE_ADMIN_API_KEY" true
+          echo "Default and test tenant accounts converged"
         env:
+          STARGATE_ADMIN_API_KEY: ${{ secrets.STARGATE_ADMIN_API_KEY }}
           STARGATE_API_KEY: ${{ secrets.STARGATE_API_KEY }}
 
       - name: Comment PR deploy URLs

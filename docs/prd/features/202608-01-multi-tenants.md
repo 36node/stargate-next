@@ -36,7 +36,7 @@
 - `TenantId` 创建后不可修改；默认 Tenant 固定使用字面量 `default`。
 - **API 校验（严）**：除保留字 `default` 外，`TenantId` 必须符合 K8s namespace / DNS label：`[a-z0-9]([-a-z0-9]*[a-z0-9])?`，最长 **63**。
 - **DB 存储（宽）**：`id` 列使用 `VARCHAR(200)`，物理上限宽于 API，便于演进；写入前仍须通过 API 校验。
-- 创建时：不传 `id` → 服务端生成满足上述 API 约束的稳定 ID（如 CUID）；传 `id` → **仅** `STARGATE_ADMIN_API_KEY` 可指定，用于与 K8s namespace 对齐；冲突返回 `TENANT_ALREADY_EXISTS`。
+- 创建时：不传 `id` → 服务端生成 `t` 加 24 位小写十六进制随机主体（共 25 字符）；传 `id` → **仅** `STARGATE_ADMIN_API_KEY` 可指定，用于与 K8s namespace 对齐；冲突返回 `TENANT_ALREADY_EXISTS`。
 - `TenantName` 仅为展示文本，不参与路由、不要求唯一，也不得用于认证。
 - `TenantApiKeyDigest = { hmacKeyId, hash }`，其中 `hash = HMAC-SHA256(secret, fullTenantApiKey)`；`(hmacKeyId, hash)` 在全部 Tenant API Key 中唯一。
 - `firstFour` 是 API Key 随机主体的展示元数据，不是认证材料。
@@ -64,6 +64,8 @@ Tenant 是认证数据的隔离边界，不是业务组织：
 - `default`：服务启动/迁移后始终存在且为 `active`；`id` 与 `name` 均为字面量 `default`；不可删除、不可改 ID；不可被再次创建占用；可被 Admin 停用（运维需谨慎，停用后等同关闭默认租户认证面）。
 - 非默认 Tenant 由 Admin API 创建：可只提交 `name`（服务生成 `id`），或同时提交符合 API 约束的 `id` 与可选 `name`；`id` 已存在时返回 `TENANT_ALREADY_EXISTS`（便于 CI/CD 幂等）；**创建 Tenant 不附带 Tenant API Key**，Key 须另一步创建；停用为状态变更，不物理删除行，以免 Account/审计历史悬空。
 - Admin 可分页列出 Tenant，并按 `name` **精确匹配**过滤（`name` 仍不唯一；列表用于运维与测试环境探测，不以 `name` 作为认证或路由键）。
+- Admin 可通过同一更新接口修改 `name` 和/或 `status`；两者均支持幂等重试。重复写相同 status 返回当前结果且不重复记录 enabled/disabled 审计。
+- `default` Tenant 允许在谨慎运维下启用/停用，但不允许改名；其他 Tenant 的 `name` 可设为字符串或 `null`。
 - Tenant 不进入 Mekong 授权模型；与 Organization、Role、Permission 无关。**Tenant ≠ 旧 Auth Namespace ≠ Organization**；`tenantId` 可与 K8s namespace 对齐，但不因此成为业务组织模型。
 
 ## 请求归属与认证策略
@@ -101,9 +103,9 @@ Tenant 是认证数据的隔离边界，不是业务组织：
 
 - **创建** `POST`：请求体可含可选 `id`、可选 `name`。
   - 不传 `id`：服务端生成满足 API 约束的 ID。
-  - 传 `id`：须通过 API 校验（支持`a-zA-Z0-9`和`-`、长度≤63、非保留 `default`）；已存在则 `TENANT_ALREADY_EXISTS`。
+  - 传 `id`：须逐字匹配 `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`（仅小写、长度 1..63、非保留 `default`，不 trim、不大小写折叠）；已存在则 `TENANT_ALREADY_EXISTS`。
   - Tenant API Key / `STARGATE_API_KEY` 若提交 `id` 字段，一律拒绝。
-- **停用 / 启用**：按 `tenantId` 变更状态，不物理删除。
+- **更新**：按 `tenantId` 修改可选 `name` 与/或 `status`（`active` / `disabled`），不物理删除；重复提交同值可安全重试。`default` 不允许改名。
 - **分页列表** `GET`：支持分页参数。
 
 列表与按 `id` 的存在性冲突响应均不得返回 Tenant API Key 明文或 hash。

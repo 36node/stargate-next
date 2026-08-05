@@ -7,12 +7,44 @@ datasource db {
   provider = "postgresql"
 }
 
+model Tenant {
+  id        String   @id @db.VarChar(200)
+  name      String?
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  accounts        Account[]
+  apiKeys         TenantApiKey[]
+  idempotencyKeys AccountCreateIdempotency[]
+  sessions        Session[]
+
+  @@map("tenants")
+}
+
+model TenantApiKey {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id") @db.VarChar(200)
+  name      String?
+  firstFour String   @map("first_four")
+  hmacKeyId String   @map("hmac_key_id")
+  hash      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([hmacKeyId, hash])
+  @@index([tenantId, createdAt])
+  @@map("tenant_api_keys")
+}
+
 model Account {
   id                String    @id @default(cuid())
+  tenantId          String    @map("tenant_id") @db.VarChar(200)
   status            String
-  username          String    @unique
-  phone             String?   @unique
-  email             String?   @unique
+  username          String
+  phone             String?
+  email             String?
   passwordAlgorithm String    @map("password_algorithm")
   passwordHash      String    @map("password_hash")
   passwordChangedAt DateTime  @map("password_changed_at") @db.Timestamptz
@@ -21,25 +53,34 @@ model Account {
   deletedAt         DateTime? @map("deleted_at") @db.Timestamptz
   idempotencyKeys   AccountCreateIdempotency[]
   sessions          Session[]
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@unique([tenantId, username])
+  @@unique([tenantId, phone])
+  @@unique([tenantId, email])
+  @@index([tenantId, deletedAt, createdAt])
   @@map("accounts")
 }
 
 model AccountCreateIdempotency {
-  key         String   @id
+  key         String
+  tenantId    String   @map("tenant_id") @db.VarChar(200)
   requestHash String   @map("request_hash")
   accountId   String?  @map("account_id")
   expiresAt   DateTime @map("expires_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
   account     Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@id([tenantId, key])
   @@index([expiresAt])
   @@map("account_create_idempotency")
 }
 
 model Session {
   id                  String   @id @default(cuid())
+  tenantId            String   @map("tenant_id") @db.VarChar(200)
   accountId           String   @map("account_id")
   refreshKeyHash      String   @map("refresh_key_hash")
   refreshKeyHmacKeyId String   @map("refresh_key_hmac_key_id")
@@ -47,14 +88,16 @@ model Session {
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
   account             Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([refreshKeyHmacKeyId, refreshKeyHash])
-  @@index([accountId, expiresAt])
+  @@index([tenantId, accountId, expiresAt])
   @@map("sessions")
 }
 
 model AuthAuditEvent {
   id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id") @db.VarChar(200)
   eventType String   @map("event_type")
   accountId String?  @map("account_id")
   sessionId String?  @map("session_id")
@@ -67,5 +110,6 @@ model AuthAuditEvent {
   metadata  Json?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  @@index([tenantId, createdAt])
   @@map("auth_audit_events")
 }

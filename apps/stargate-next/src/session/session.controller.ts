@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   Inject,
   Param,
@@ -19,24 +18,7 @@ import type {
 import type { Request } from "express";
 
 import { STARGATE_SERVICE } from "../auth/stargate-service.module";
-
-function context(request: Request) {
-  const forwardedFor = request.headers["x-forwarded-for"];
-  return {
-    ip:
-      typeof forwardedFor === "string"
-        ? forwardedFor.split(",")[0]?.trim()
-        : request.ip,
-    requestId:
-      typeof request.headers["x-request-id"] === "string"
-        ? request.headers["x-request-id"]
-        : undefined,
-    userAgent:
-      typeof request.headers["user-agent"] === "string"
-        ? request.headers["user-agent"]
-        : undefined,
-  };
-}
+import { requestContext, tenantHeader } from "../platform/request-context";
 
 function requiredString(
   value: unknown,
@@ -44,10 +26,7 @@ function requiredString(
   message: string
 ): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new BadRequestException({
-      code,
-      message,
-    });
+    throw new BadRequestException({ code, message });
   }
   return value;
 }
@@ -65,14 +44,21 @@ export class SessionController {
 
   @Post("captchas")
   createCaptcha(@Req() request: Request) {
-    return this.service.createCaptcha(context(request));
+    return this.service.createCaptcha(
+      tenantHeader(request),
+      requestContext(request)
+    );
   }
 
   @Post("captchas/verify")
   @HttpCode(200)
-  async verifyCaptcha(@Body() body: { code?: unknown; id?: unknown }) {
+  async verifyCaptcha(
+    @Body() body: { code?: unknown; id?: unknown },
+    @Req() request: Request
+  ) {
     return {
       verified: await this.service.verifyCaptcha(
+        tenantHeader(request),
         requiredString(
           body?.id,
           "CAPTCHA_ID_INVALID",
@@ -99,6 +85,7 @@ export class SessionController {
     @Req() request: Request
   ) {
     return this.service.login(
+      tenantHeader(request),
       {
         captchaCode: requiredString(
           body?.captchaCode,
@@ -121,7 +108,7 @@ export class SessionController {
           "password is required"
         ),
       },
-      context(request)
+      requestContext(request)
     );
   }
 
@@ -129,37 +116,36 @@ export class SessionController {
   @HttpCode(200)
   refresh(@Body() body: { refreshKey?: unknown }, @Req() request: Request) {
     return this.service.refresh(
+      tenantHeader(request),
       requiredString(
         body?.refreshKey,
         "REFRESH_KEY_INVALID",
         "refresh key is required"
       ),
-      context(request)
+      requestContext(request)
     );
   }
 
   @Post("auth/logout")
   @HttpCode(204)
-  async logout(
-    @Headers("authorization") authorization: string | undefined,
-    @Req() request: Request
-  ) {
-    const claims = this.service.accessTokenClaims(authorization);
-    await this.service.revokeSessions(
-      claims.accountId,
-      context(request),
-      "logout",
-      claims.sessionId
+  async logout(@Req() request: Request) {
+    await this.service.logout(
+      tenantHeader(request),
+      request.header("authorization"),
+      requestContext(request)
     );
   }
 
   @Get("accounts/:accountId/sessions")
-  listSessions(
+  async listSessions(
     @Param("accountId") accountId: string,
-    @Headers("x-api-key") apiKey?: string
+    @Req() request: Request
   ) {
-    this.service.assertApiKey(apiKey);
-    return this.service.listSessions(accountId);
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
+    return this.service.listSessions(scope, accountId);
   }
 
   @Delete("accounts/:accountId/sessions")
@@ -169,10 +155,14 @@ export class SessionController {
     @Query("sessionId") sessionId: string | undefined,
     @Req() request: Request
   ) {
-    this.service.assertApiKey(request.header("x-api-key"));
+    const scope = await this.service.resolveApiCredential(
+      request.header("x-api-key"),
+      tenantHeader(request)
+    );
     await this.service.revokeSessions(
+      scope,
       accountId,
-      context(request),
+      requestContext(request),
       sessionId ? "admin_single_revoke" : "admin_bulk_revoke",
       sessionId
     );

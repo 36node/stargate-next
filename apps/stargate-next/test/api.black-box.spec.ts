@@ -114,8 +114,10 @@ describe("Given a running Stargate Next service", () => {
       ).toString("utf8")
     ) as Record<string, unknown>;
     expect(Object.keys(claims).sort()).toEqual(
-      ["exp", "iat", "sid", "sub", "type"].sort()
+      ["exp", "iat", "sid", "sub", "tid", "type"].sort()
     );
+    expect(claims.tid).toBe("default");
+    expect((login.body as { tenantId: string }).tenantId).toBe("default");
 
     const reusedCaptcha = await request("/v1/auth/login", "POST", {
       body: {
