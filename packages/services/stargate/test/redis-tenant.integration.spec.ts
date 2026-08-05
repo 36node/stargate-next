@@ -24,7 +24,6 @@ const config: StargateConfig = {
   captchaTestCode: "ABCD",
   captchaTtlSeconds: 300,
   clockToleranceSeconds: 30,
-  deployTier: "test",
   jwtSecret: `${prefix}-jwt-secret`,
   loginAttempts: 2,
   loginLockSeconds: 60,

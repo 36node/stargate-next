@@ -20,7 +20,6 @@ stargateNext:
     port: 9527
   config:
     nodeEnv: production
-    deployTier: production
     logLevel: info
     redisKeyPrefix: "stargate-next:"
     accessTokenTtlSeconds: "3600"
@@ -32,8 +31,6 @@ stargateNext:
     captchaCreateWindowSeconds: "60"
     loginMaxAttempts: "5"
     loginLockSeconds: "60"
-    captchaTestMode: false
-    captchaTestCode: ""
   secrets:
     databaseUrl: ""
     redisUrl: ""

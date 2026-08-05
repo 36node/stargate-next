@@ -9,7 +9,6 @@ const baseEnvironment: NodeJS.ProcessEnv = {
   REFRESH_KEY_HMAC_PRIMARY_SECRET: "primary-secret",
   STARGATE_ADMIN_API_KEY: "admin-api-key",
   STARGATE_API_KEY: "api-key",
-  STARGATE_DEPLOY_TIER: "test",
   STARGATE_JWT_SECRET: "jwt-secret",
   TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "tenant-primary",
   TENANT_API_KEY_HMAC_PRIMARY_SECRET: "tenant-primary-secret",
@@ -20,20 +19,6 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 describe("stargate config", () => {
-  it("rejects captcha test mode in production", () => {
-    expect(() =>
-      loadStargateConfig(
-        environment({
-          CAPTCHA_TEST_CODE: "A1B2",
-          CAPTCHA_TEST_MODE: "true",
-          STARGATE_DEPLOY_TIER: "production",
-        })
-      )
-    ).toThrow(
-      "CAPTCHA_TEST_MODE requires a non-production STARGATE_DEPLOY_TIER"
-    );
-  });
-
   it("requires and validates the fixed captcha code", () => {
     expect(() =>
       loadStargateConfig(environment({ CAPTCHA_TEST_MODE: "true" }))
@@ -52,17 +37,6 @@ describe("stargate config", () => {
         environment({ CAPTCHA_TEST_CODE: "abcd", CAPTCHA_TEST_MODE: "true" })
       ).captchaTestCode
     ).toBe("ABCD");
-  });
-
-  it("validates deploy tiers without falling back on typos", () => {
-    expect(loadStargateConfig(environment()).deployTier).toBe("test");
-    expect(
-      loadStargateConfig(environment({ STARGATE_DEPLOY_TIER: "preview" }))
-        .deployTier
-    ).toBe("preview");
-    expect(() =>
-      loadStargateConfig(environment({ STARGATE_DEPLOY_TIER: "prodution" }))
-    ).toThrow("STARGATE_DEPLOY_TIER must be one of");
   });
 
   it("validates the optional secondary refresh key pair", () => {

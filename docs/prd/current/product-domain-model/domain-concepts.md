@@ -287,7 +287,7 @@ CaptchaChallenge 是存放于 Redis 的短生命周期实体。
 - 正确验证后原子消费，不能重复使用。
 - 错误验证增加尝试次数；达到上限后失效。
 - 生产响应不得返回明文 code。
-- `CAPTCHA_TEST_MODE=true` 只允许用于非生产隔离测试环境；生产环境启用时服务必须拒绝启动。
+- `CAPTCHA_TEST_MODE=true` 只用于隔离的自动化测试进程；PR、UAT 与生产部署环境均使用真实验证码，不配置固定测试 code。
 - 测试模式必须同时配置由 4 个 ASCII 字母或数字组成的 `CAPTCHA_TEST_CODE`。创建的每个 CaptchaChallenge 使用该固定 code，响应中不得返回明文 code。
 - 固定测试 code 仍绑定唯一 CaptchaId，并遵守与生产 code 相同的 TTL、尝试次数、一次性消费、创建限流和登录失败计数规则。
 

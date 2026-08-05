@@ -5,11 +5,7 @@ export {
   verifyAccessToken,
   verifyAuthorizationHeader,
 } from "./access-token";
-export {
-  type DeployTier,
-  loadStargateConfig,
-  type StargateConfig,
-} from "./config";
+export { loadStargateConfig, type StargateConfig } from "./config";
 export type {
   AccessTokenClaims,
   AccountCollection,

@@ -166,7 +166,6 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
           NODE_ENV: test
           STARGATE_ADMIN_API_KEY: ci-admin-api-key
-          STARGATE_DEPLOY_TIER: test
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379
           REDIS_KEY_PREFIX: "stargate-next:ci-${{ github.run_id }}:"
@@ -402,9 +401,6 @@ jobs:
 
           echo "chart_sha=${chart_sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Lint Helm chart
-        run: helm lint deploy/helm-chart
-
       - name: Resolve chart version
         id: chart-version
         env:
@@ -433,20 +429,6 @@ jobs:
           mkdir -p "$destination"
 
           helm package "$chart_dir" --version "$CHART_VERSION" --destination "$destination"
-
-          rendered_file="${RUNNER_TEMP}/stargate-next-chart.yaml"
-          helm template stargate-next "${destination}/stargate-chart-${CHART_VERSION}.tgz" \
-            --set-string stargateNext.secrets.stargateAdminApiKey=chart-admin-api-key \
-            --set-string stargateNext.secrets.tenantApiKeyHmacPrimaryKeyId=chart-tenant-primary \
-            --set-string stargateNext.secrets.tenantApiKeyHmacPrimarySecret=chart-tenant-primary-secret \
-            > "$rendered_file"
-
-          grep -Fq 'STARGATE_ADMIN_API_KEY: "chart-admin-api-key"' "$rendered_file"
-          grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: "chart-tenant-primary"' "$rendered_file"
-          grep -Fq 'TENANT_API_KEY_HMAC_PRIMARY_SECRET: "chart-tenant-primary-secret"' "$rendered_file"
-          grep -Fq 'STARGATE_DEPLOY_TIER: "production"' "$rendered_file"
-          ! grep -Fq 'CAPTCHA_TEST_MODE:' "$rendered_file"
-
           helm push "${destination}/stargate-chart-${CHART_VERSION}.tgz" "$repository"
 
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then

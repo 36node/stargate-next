@@ -1,20 +1,5 @@
 const CAPTCHA_TEST_CODE_PATTERN = /^[A-Z0-9]{4}$/;
 const NON_NEGATIVE_DECIMAL = /^(0|[1-9][0-9]*)$/;
-const DEPLOY_TIERS = [
-  "development",
-  "preview",
-  "production",
-  "test",
-  "uat",
-] as const;
-const CAPTCHA_TEST_ALLOWED_TIERS = new Set<DeployTier>([
-  "development",
-  "preview",
-  "test",
-  "uat",
-]);
-
-export type DeployTier = (typeof DEPLOY_TIERS)[number];
 
 export type StargateConfig = {
   accountCreateIdempotencyTtlSeconds: number;
@@ -27,7 +12,6 @@ export type StargateConfig = {
   captchaTestCode?: string;
   captchaTtlSeconds: number;
   clockToleranceSeconds: number;
-  deployTier: DeployTier;
   jwtSecret: string;
   loginAttempts: number;
   loginLockSeconds: number;
@@ -47,16 +31,6 @@ function required(environment: NodeJS.ProcessEnv, name: string): string {
     throw new Error(`${name} must be configured`);
   }
   return value;
-}
-
-function deployTier(environment: NodeJS.ProcessEnv): DeployTier {
-  const value = environment.STARGATE_DEPLOY_TIER ?? "production";
-  if (!DEPLOY_TIERS.includes(value as DeployTier)) {
-    throw new Error(
-      "STARGATE_DEPLOY_TIER must be one of development, preview, production, test, or uat"
-    );
-  }
-  return value as DeployTier;
 }
 
 function positiveInteger(
@@ -147,13 +121,7 @@ export function loadStargateConfig(
   ) {
     throw new Error("tenant api key HMAC key ids must be distinct");
   }
-  const selectedDeployTier = deployTier(environment);
   const testCaptcha = environment.CAPTCHA_TEST_MODE === "true";
-  if (testCaptcha && !CAPTCHA_TEST_ALLOWED_TIERS.has(selectedDeployTier)) {
-    throw new Error(
-      "CAPTCHA_TEST_MODE requires a non-production STARGATE_DEPLOY_TIER"
-    );
-  }
   const captchaTestCode = testCaptcha
     ? required(environment, "CAPTCHA_TEST_CODE").trim().toUpperCase()
     : undefined;
@@ -163,9 +131,7 @@ export function loadStargateConfig(
     );
   }
   if (testCaptcha) {
-    console.warn(
-      `[stargate] CAPTCHA test mode is enabled for ${selectedDeployTier}`
-    );
+    console.warn("[stargate] CAPTCHA test mode is enabled");
   }
   const captchaHmacSecret = required(environment, "CAPTCHA_HMAC_SECRET");
   const jwtSecret = required(environment, "STARGATE_JWT_SECRET");
@@ -234,7 +200,6 @@ export function loadStargateConfig(
       "300"
     ),
     clockToleranceSeconds,
-    deployTier: selectedDeployTier,
     jwtSecret,
     loginAttempts: positiveInteger(environment, "LOGIN_MAX_ATTEMPTS", "5"),
     loginLockSeconds: positiveInteger(environment, "LOGIN_LOCK_SECONDS", "60"),
