@@ -106,7 +106,6 @@ jobs:
       - name: Deploy database migrations
         run: |
           pnpm db:migrate
-          pnpm db:migrate
           pnpm --filter stargate-next seed:default-tenant
           pnpm --filter stargate-next seed:legacy-fixture
         env:
