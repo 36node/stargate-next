@@ -109,14 +109,18 @@ jobs:
           fi
 
           case "$K6_PROFILE" in
-            smoke) pnpm --filter stargate-next test:load:smoke ;;
-            ci) pnpm --filter stargate-next test:load:ci ;;
-            ramp) pnpm --filter stargate-next test:load ;;
+            smoke|ci|ramp) ;;
             *)
               echo "::error::Unknown K6_PROFILE=$K6_PROFILE"
               exit 1
               ;;
           esac
+
+          # --quiet disables ~1s progress spam in Actions logs; final summary still prints.
+          (
+            cd apps/stargate-next
+            k6 run -q -e "K6_PROFILE=${K6_PROFILE}" load-test/scenarios/tenant-auth.js
+          )
 
       - name: Publish Job Summary
         if: always()

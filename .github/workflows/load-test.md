@@ -20,3 +20,5 @@
 
 1. 在 Actions run 页面的 **Summary** 展示关键指标表格（VUs、p95、checks、thresholds）
 2. 上传 `apps/stargate-next/load-test/results/` 下的 JSON / HTML / Markdown 为 artifact（保留 14 天）
+
+CI 使用 `k6 run -q`，不刷进度条；结束时的 summary / thresholds 仍会输出。
