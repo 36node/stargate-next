@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["k6"]
+  },
+  "include": ["./**/*.js"],
+  "exclude": ["./results"]
+}

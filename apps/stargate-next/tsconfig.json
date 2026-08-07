@@ -14,5 +14,6 @@
     "skipLibCheck": true,
     "strict": true,
     "esModuleInterop": true
-  }
+  },
+  "exclude": ["dist", "load-test", "node_modules"]
 }

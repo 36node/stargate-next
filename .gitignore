@@ -296,3 +296,7 @@ packages/db/.probe/
 /data
 
 .mindfs
+
+# k6 load-test run artifacts
+apps/stargate-next/load-test/results/*
+!apps/stargate-next/load-test/results/.gitkeep

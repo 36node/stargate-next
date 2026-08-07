@@ -16,6 +16,9 @@
     "test": "vitest run --passWithNoTests --exclude 'test/**/*.black-box.spec.ts'",
     "test:api": "vitest run api.black-box.spec.ts",
     "test:sdk": "vitest run sdk.black-box.spec.ts",
+    "test:load": "k6 run load-test/scenarios/tenant-auth.js",
+    "test:load:smoke": "k6 run -e K6_PROFILE=smoke load-test/scenarios/tenant-auth.js",
+    "test:load:ci": "k6 run -e K6_PROFILE=ci load-test/scenarios/tenant-auth.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -36,6 +39,7 @@
     "@nestjs/testing": "^11.1.6",
     "@repo/stargate-next-sdk": "workspace:*",
     "@types/express": "^5.0.3",
+    "@types/k6": "^2.0.1",
     "@types/node": "^24.10.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
