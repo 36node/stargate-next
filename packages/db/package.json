@@ -22,8 +22,10 @@
     "migrate:push": "prisma db push",
     "migrate:push:force": "prisma db push --force-reset",
     "migrate:deploy": "prisma migrate deploy",
+    "migrate:legacy-accounts": "tsx scripts/migrate-legacy-accounts.ts",
     "prisma": "prisma",
     "studio": "prisma studio",
+    "test:migration": "tsx --test scripts/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:backfill": "tsx scripts/verify-backfill-migration.ts"
   },
@@ -31,6 +33,7 @@
     "@prisma/adapter-pg": "7.3.0",
     "@prisma/client": "7.3.0",
     "dotenv": "^16.4.0",
+    "mongodb": "^6.20.0",
     "pg": "^8.19.0",
     "zod": "^4.3.6"
   },
