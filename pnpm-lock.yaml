@@ -317,6 +317,9 @@ importers:
       '@types/express':
         specifier: ^5.0.3
         version: 5.0.6
+      '@types/k6':
+        specifier: ^2.0.1
+        version: 2.0.1
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.2
@@ -4140,6 +4143,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/k6@2.0.1':
+    resolution: {integrity: sha512-3lAXtNx1qMwnn+fbE65yP1h9ADJyG6xQaIfGrhasZI2uck8S+gLuCbQl38YkbR5lGeE/NyCiF0FznmElpUgBsA==}
 
   '@types/node@14.18.63':
     resolution: {integrity: sha512-fAtCfv4jJg+ExtXhvCkCqUKZ+4ok/JQk01qDKhL5BDDoS3AxKXhV5/MAVUZyQnSEd2GT92fkgZl0pz0Q0AzcIQ==}
@@ -12093,6 +12099,8 @@ snapshots:
   '@types/js-cookie@3.0.6': {}
 
   '@types/json-schema@7.0.15': {}
+
+  '@types/k6@2.0.1': {}
 
   '@types/node@14.18.63': {}
 

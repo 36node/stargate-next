@@ -38,7 +38,9 @@
       // 排除框架自动生成的代码检查
       "!packages/db/generated",
       "!packages/stargate-next-sdk/src/generated.ts",
-      "!packages/stargate-next-sdk/src/openapi.ts"
+      "!packages/stargate-next-sdk/src/openapi.ts",
+      // k6 scripts use runtime globals (__ENV/__VU) and k6 modules, not Node/Biome defaults
+      "!apps/stargate-next/load-test"
     ]
   },
   "linter": {

@@ -1,0 +1,162 @@
+name: Load test
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: k6 profile (smoke | ci | ramp)
+        required: true
+        default: ci
+        type: choice
+        options:
+          - smoke
+          - ci
+          - ramp
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  load-test:
+    name: Stargate Next k6 load test
+    runs-on: arc-runners-mekong
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_DB: stargate-next-load
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d stargate-next-load"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      ACCESS_TOKEN_TTL_SECONDS: "3600"
+      JWT_CLOCK_TOLERANCE_SECONDS: "30"
+      CAPTCHA_HMAC_SECRET: load-captcha-hmac-secret
+      CAPTCHA_TEST_CODE: ABCD
+      CAPTCHA_TEST_MODE: "true"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-load
+      K6_PROFILE: ${{ inputs.profile }}
+      NODE_ENV: test
+      REDIS_KEY_PREFIX: "stargate-next:load-${{ github.run_id }}:"
+      REDIS_URL: redis://localhost:6379
+      REFRESH_KEY_HMAC_PRIMARY_KEY_ID: load-primary
+      REFRESH_KEY_HMAC_PRIMARY_SECRET: load-primary-secret
+      STARGATE_ADMIN_API_KEY: load-admin-api-key
+      STARGATE_API_KEY: load-service-api-key
+      STARGATE_ENDPOINT: http://127.0.0.1:9527
+      STARGATE_JWT_SECRET: load-jwt-secret
+      TENANT_API_KEY_HMAC_PRIMARY_KEY_ID: load-tenant-key-primary
+      TENANT_API_KEY_HMAC_PRIMARY_SECRET: load-tenant-key-primary-secret
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Deploy database migrations
+        run: |
+          pnpm db:migrate
+          pnpm --filter stargate-next seed:default-tenant
+          pnpm --filter stargate-next seed:legacy-fixture
+
+      - name: Build Stargate Next
+        run: pnpm --filter stargate-next build
+
+      - name: Run k6 load test
+        run: |
+          set -euo pipefail
+          pnpm --filter stargate-next start > /tmp/stargate-next-load.log 2>&1 &
+          stargate_pid=$!
+          trap 'kill "$stargate_pid" 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 60); do
+            if ! kill -0 "$stargate_pid" 2>/dev/null; then
+              cat /tmp/stargate-next-load.log
+              exit 1
+            fi
+            if curl --fail --silent http://127.0.0.1:9527/health/ready; then
+              break
+            fi
+            sleep 1
+          done
+          if ! curl --fail --silent http://127.0.0.1:9527/health/ready; then
+            cat /tmp/stargate-next-load.log
+            exit 1
+          fi
+
+          case "$K6_PROFILE" in
+            smoke) pnpm --filter stargate-next test:load:smoke ;;
+            ci) pnpm --filter stargate-next test:load:ci ;;
+            ramp) pnpm --filter stargate-next test:load ;;
+            *)
+              echo "::error::Unknown K6_PROFILE=$K6_PROFILE"
+              exit 1
+              ;;
+          esac
+
+      - name: Publish Job Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          results_dir="apps/stargate-next/load-test/results"
+          {
+            echo "## Load test"
+            echo
+            echo "- Profile: \`${K6_PROFILE}\`"
+            echo "- Run: [\`${GITHUB_RUN_ID}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          latest_md="$(ls -1t "$results_dir"/*-summary.md 2>/dev/null | head -n 1 || true)"
+          if [ -n "$latest_md" ]; then
+            cat "$latest_md" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Full HTML/JSON reports are attached as the \`load-test-results-${GITHUB_RUN_ID}\` artifact." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No k6 summary markdown was produced. Check the job log and Stargate Next service output._" >> "$GITHUB_STEP_SUMMARY"
+            if [ -f /tmp/stargate-next-load.log ]; then
+              {
+                echo
+                echo "<details><summary>Stargate Next log (tail)</summary>"
+                echo
+                echo '```'
+                tail -n 80 /tmp/stargate-next-load.log
+                echo '```'
+                echo
+                echo "</details>"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+      - name: Upload load-test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-test-results-${{ github.run_id }}
+          path: apps/stargate-next/load-test/results/
+          if-no-files-found: ignore
+          retention-days: 14
