@@ -23,7 +23,9 @@ type AccountActionsProps = {
 const initialState: AccountActionState = {};
 
 export function SelfChangePasswordForm() {
-  const formRef = useRef<HTMLFormElement>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [state, setState] = useState(initialState);
   const [isPending, startTransition] = useTransition();
 
@@ -38,14 +40,16 @@ export function SelfChangePasswordForm() {
       const nextState = await selfChangePasswordAction(formData);
       setState(nextState);
       if (nextState.success) {
-        formRef.current?.reset();
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
       }
     });
   }
 
   return (
     <section aria-labelledby="self-change-password-heading">
-      <form className="dialog-form" onSubmit={handleSubmit} ref={formRef}>
+      <form className="dialog-form" onSubmit={handleSubmit}>
         <div className="dialog-heading">
           <h2 id="self-change-password-heading">修改当前登录密码</h2>
           <p>使用当前登录会话验证并更新自己的密码。</p>
@@ -56,7 +60,9 @@ export function SelfChangePasswordForm() {
             autoComplete="current-password"
             id="self-change-current-password"
             name="currentPassword"
+            onValueChange={setCurrentPassword}
             required
+            value={currentPassword}
           />
         </label>
         <label htmlFor="self-change-new-password">
@@ -65,7 +71,9 @@ export function SelfChangePasswordForm() {
             autoComplete="new-password"
             id="self-change-new-password"
             name="newPassword"
+            onValueChange={setNewPassword}
             required
+            value={newPassword}
           />
         </label>
         <label htmlFor="self-change-confirm-password">
@@ -74,7 +82,9 @@ export function SelfChangePasswordForm() {
             autoComplete="new-password"
             id="self-change-confirm-password"
             name="confirmPassword"
+            onValueChange={setConfirmPassword}
             required
+            value={confirmPassword}
           />
         </label>
         {state.error ? <p className="form-error">{state.error}</p> : null}
