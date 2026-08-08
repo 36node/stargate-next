@@ -5,9 +5,11 @@ import { MongoClient } from "mongodb";
 
 import {
   type AccountIdStrategy,
+  accountId,
   assertAccountMigrationComplete,
   type LegacyUser,
   type MigratedAccount,
+  type SkippedLegacyAccount,
   transformLegacyUsers,
 } from "./legacy-account-migration";
 
@@ -51,6 +53,26 @@ function batches<T>(values: T[], size: number): T[][] {
     result.push(values.slice(offset, offset + size));
   }
   return result;
+}
+
+async function assertSkippedAccountsAbsent(
+  db: typeof import("../index").db,
+  skippedUsers: SkippedLegacyAccount[],
+  tenantId: string,
+  strategy: AccountIdStrategy
+): Promise<void> {
+  const skippedTargetIds = skippedUsers.flatMap(({ legacyUserId }) =>
+    legacyUserId ? [accountId(legacyUserId, tenantId, strategy)] : []
+  );
+  for (const batch of batches(skippedTargetIds, QueryBatchSize)) {
+    const existingSkippedAccounts = await db.account.findMany({
+      select: { id: true },
+      where: { id: { in: batch } },
+    });
+    if (existingSkippedAccounts.length > 0) {
+      throw new Error("target contains account skipped by migration policy");
+    }
+  }
 }
 
 function sameAccount(
@@ -99,12 +121,18 @@ async function main(): Promise<void> {
       .collection<LegacyUser>("users")
       .find({})
       .toArray();
-    const accounts = transformLegacyUsers(source, tenantId, strategy);
+    const { accounts, skippedUsers } = transformLegacyUsers(
+      source,
+      tenantId,
+      strategy
+    );
 
     const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant || tenant.status !== "active") {
       throw new Error(`target tenant ${tenantId} is not active`);
     }
+
+    await assertSkippedAccountsAbsent(db, skippedUsers, tenantId, strategy);
 
     const expectedById = new Map(
       accounts.map((account) => [account.id, account])
@@ -174,9 +202,18 @@ async function main(): Promise<void> {
 
     console.log(
       JSON.stringify({
+        eligible: accounts.length,
         existing: accounts.length - missing.length,
         mode,
-        source: accounts.length,
+        skipped: skippedUsers.length,
+        skippedLegacyUserIds: skippedUsers.flatMap(({ legacyUserId }) =>
+          legacyUserId ? [legacyUserId] : []
+        ),
+        skippedUsers: skippedUsers.map((user) => ({
+          ...user,
+          scope: "account",
+        })),
+        source: source.length,
         toCreate: missing.length,
       })
     );

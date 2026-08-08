@@ -10,6 +10,7 @@ export type AccountIdStrategy = "derived" | "legacy";
 export type LegacyUser = {
   _id?: unknown;
   active?: unknown;
+  createdAt?: unknown;
   email?: unknown;
   password?: unknown;
   passwordChangedAt?: unknown;
@@ -28,6 +29,27 @@ export type MigratedAccount = {
   tenantId: string;
   username: string;
 };
+
+export type SkippedLegacyAccount = {
+  legacyUserId: string | null;
+  reason: string;
+  sourceIndex: number;
+  username: string | null;
+};
+
+export type LegacyAccountMigrationPlan = {
+  accounts: MigratedAccount[];
+  skippedUsers: SkippedLegacyAccount[];
+};
+
+type AccountCandidate = {
+  account: MigratedAccount;
+  legacyUserId: string;
+  source: LegacyUser;
+  sourceIndex: number;
+};
+
+type UniqueAccountField = "email" | "id" | "phone" | "username";
 
 type LegacyObjectId = {
   toHexString: () => string;
@@ -106,12 +128,23 @@ function normalizePhone(value: unknown): string | null {
   return normalized;
 }
 
-function parsePasswordChangedAt(value: unknown): Date {
+function validDate(value: unknown): Date | null {
   const date = value instanceof Date ? value : new Date(String(value ?? ""));
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("passwordChangedAt is required and must be valid");
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parsePasswordChangedAt(value: unknown, createdAt: unknown): Date {
+  const passwordChangedAt = validDate(value);
+  if (passwordChangedAt) {
+    return passwordChangedAt;
   }
-  return date;
+  const fallback = validDate(createdAt);
+  if (!fallback) {
+    throw new Error(
+      "passwordChangedAt is missing or invalid and createdAt must be valid"
+    );
+  }
+  return fallback;
 }
 
 function accountStatus(value: unknown): "active" | "disabled" {
@@ -121,22 +154,101 @@ function accountStatus(value: unknown): "active" | "disabled" {
   return value === false ? "disabled" : "active";
 }
 
-function assertUnique(
-  accounts: MigratedAccount[],
-  field: "email" | "id" | "phone" | "username"
-): void {
-  const owners = new Map<string, string>();
-  for (const account of accounts) {
-    const value = account[field];
-    if (value === null) {
+function reportLegacyId(value: unknown): string | null {
+  try {
+    return legacyId(value);
+  } catch {
+    return null;
+  }
+}
+
+function reportUsername(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function identifierIsCanonical(
+  candidate: AccountCandidate,
+  field: "email" | "phone" | "username"
+): boolean {
+  const { account, source } = candidate;
+  const sourceValue = source[field];
+  const accountValue = account[field];
+  return (
+    accountValue !== null &&
+    typeof sourceValue === "string" &&
+    sourceValue.trim() === accountValue
+  );
+}
+
+function candidateOrder(
+  left: AccountCandidate,
+  right: AccountCandidate
+): number {
+  for (const field of ["username", "email", "phone"] as const) {
+    const canonicalDifference =
+      Number(identifierIsCanonical(right, field)) -
+      Number(identifierIsCanonical(left, field));
+    if (canonicalDifference !== 0) {
+      return canonicalDifference;
+    }
+  }
+  const leftCreatedAt =
+    validDate(left.source.createdAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+  const rightCreatedAt =
+    validDate(right.source.createdAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+  return (
+    leftCreatedAt - rightCreatedAt ||
+    left.legacyUserId.localeCompare(right.legacyUserId) ||
+    left.sourceIndex - right.sourceIndex
+  );
+}
+
+function selectUniqueAccounts(candidates: AccountCandidate[]): {
+  accounts: MigratedAccount[];
+  skippedUsers: SkippedLegacyAccount[];
+} {
+  const fields: UniqueAccountField[] = ["id", "username", "phone", "email"];
+  const owners = new Map<UniqueAccountField, Set<string>>(
+    fields.map((field) => [field, new Set<string>()])
+  );
+  const selected: AccountCandidate[] = [];
+  const skippedUsers: SkippedLegacyAccount[] = [];
+
+  for (const candidate of [...candidates].sort(candidateOrder)) {
+    const conflictingFields = fields.filter((field) => {
+      const value = candidate.account[field];
+      return value !== null && owners.get(field)?.has(value);
+    });
+    if (conflictingFields.length > 0) {
+      skippedUsers.push({
+        legacyUserId: candidate.legacyUserId,
+        reason: conflictingFields
+          .map((field) =>
+            field === "id"
+              ? "id is duplicated"
+              : `${field} conflicts after normalization`
+          )
+          .join("; "),
+        sourceIndex: candidate.sourceIndex,
+        username: reportUsername(candidate.source.username),
+      });
       continue;
     }
-    const previous = owners.get(value);
-    if (previous) {
-      throw new Error(`${field} conflicts after normalization`);
+    selected.push(candidate);
+    for (const field of fields) {
+      const value = candidate.account[field];
+      if (value !== null) {
+        owners.get(field)?.add(value);
+      }
     }
-    owners.set(value, account.id);
   }
+
+  return {
+    accounts: selected
+      .sort((left, right) => left.sourceIndex - right.sourceIndex)
+      .map(({ account }) => account),
+    skippedUsers,
+  };
 }
 
 export function accountId(
@@ -168,7 +280,10 @@ export function transformLegacyUser(
     email: normalizeEmail(source.email),
     id: accountId(legacyUserId, tenantId, strategy),
     passwordAlgorithm: "legacy-md5",
-    passwordChangedAt: parsePasswordChangedAt(source.passwordChangedAt),
+    passwordChangedAt: parsePasswordChangedAt(
+      source.passwordChangedAt,
+      source.createdAt
+    ),
     passwordHash,
     phone: normalizePhone(source.phone),
     status: accountStatus(source.active),
@@ -181,21 +296,36 @@ export function transformLegacyUsers(
   source: LegacyUser[],
   tenantId: string,
   strategy: AccountIdStrategy
-): MigratedAccount[] {
+): LegacyAccountMigrationPlan {
   if (source.length === 0) {
     throw new Error("users collection is empty");
   }
-  const accounts = source.map((user, index) => {
+  const candidates: AccountCandidate[] = [];
+  const skippedUsers: SkippedLegacyAccount[] = [];
+  source.forEach((user, sourceIndex) => {
     try {
-      return transformLegacyUser(user, tenantId, strategy);
+      const legacyUserId = legacyId(user._id);
+      candidates.push({
+        account: transformLegacyUser(user, tenantId, strategy),
+        legacyUserId,
+        source: user,
+        sourceIndex,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`users[${index}] failed preflight: ${message}`);
+      skippedUsers.push({
+        legacyUserId: reportLegacyId(user._id),
+        reason: message,
+        sourceIndex,
+        username: reportUsername(user.username),
+      });
     }
   });
-  assertUnique(accounts, "id");
-  assertUnique(accounts, "username");
-  assertUnique(accounts, "phone");
-  assertUnique(accounts, "email");
-  return accounts;
+  const unique = selectUniqueAccounts(candidates);
+  return {
+    accounts: unique.accounts,
+    skippedUsers: [...skippedUsers, ...unique.skippedUsers].sort(
+      (left, right) => left.sourceIndex - right.sourceIndex
+    ),
+  };
 }
