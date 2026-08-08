@@ -31,6 +31,8 @@ stargateNext:
     captchaCreateWindowSeconds: "60"
     loginMaxAttempts: "5"
     loginLockSeconds: "60"
+    passwordChangeMaxAttempts: "5"
+    passwordChangeLockSeconds: "60"
   secrets:
     databaseUrl: ""
     redisUrl: ""

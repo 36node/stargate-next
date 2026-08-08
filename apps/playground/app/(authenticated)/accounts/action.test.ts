@@ -10,9 +10,20 @@ const mocks = vi.hoisted(() => ({
   getSessionTokenFromCookie: vi.fn(),
   getTenantFromCookie: vi.fn(),
   selfChangePassword: vi.fn(),
+  StargateApiError: class StargateApiError extends Error {
+    readonly code: string;
+    readonly status: number;
+
+    constructor(code: string, status: number, message: string) {
+      super(message);
+      this.code = code;
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("@repo/stargate-next-sdk", () => ({
+  StargateApiError: mocks.StargateApiError,
   StargateNextClient: vi.fn(function StargateNextClient() {
     return { selfChangePassword: mocks.selfChangePassword };
   }),
@@ -118,5 +129,40 @@ describe("selfChangePasswordAction", () => {
       "new-password",
       "tenant-1"
     );
+  });
+
+  it.each([
+    ["ACCESS_TOKEN_INVALID", 401, "登录状态已失效，请重新登录。"],
+    ["CURRENT_PASSWORD_INVALID", 401, "当前密码不正确。"],
+    ["PASSWORD_CHANGE_LOCKED", 429, "当前密码错误次数过多，请稍后再试。"],
+    ["PASSWORD_INVALID", 400, "新密码不符合要求。"],
+  ])("shows the %s failure reason", async (code, status, message) => {
+    mocks.selfChangePassword.mockRejectedValue(
+      new mocks.StargateApiError(code, status, "upstream message")
+    );
+
+    await expect(
+      selfChangePasswordAction(
+        form({
+          confirmPassword: "new-password",
+          currentPassword: "current",
+          newPassword: "new-password",
+        })
+      )
+    ).resolves.toEqual({ error: message });
+  });
+
+  it("keeps unexpected failures user safe", async () => {
+    mocks.selfChangePassword.mockRejectedValue(new Error("network details"));
+
+    await expect(
+      selfChangePasswordAction(
+        form({
+          confirmPassword: "new-password",
+          currentPassword: "current",
+          newPassword: "new-password",
+        })
+      )
+    ).resolves.toEqual({ error: "修改密码失败，请稍后重试。" });
   });
 });

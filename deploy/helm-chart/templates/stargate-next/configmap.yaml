@@ -20,4 +20,6 @@ data:
   CAPTCHA_CREATE_WINDOW_SECONDS: {{ .Values.stargateNext.config.captchaCreateWindowSeconds | quote }}
   LOGIN_MAX_ATTEMPTS: {{ .Values.stargateNext.config.loginMaxAttempts | quote }}
   LOGIN_LOCK_SECONDS: {{ .Values.stargateNext.config.loginLockSeconds | quote }}
+  PASSWORD_CHANGE_MAX_ATTEMPTS: {{ .Values.stargateNext.config.passwordChangeMaxAttempts | quote }}
+  PASSWORD_CHANGE_LOCK_SECONDS: {{ .Values.stargateNext.config.passwordChangeLockSeconds | quote }}
 {{- end }}

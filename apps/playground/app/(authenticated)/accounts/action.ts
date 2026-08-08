@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
 
 import { sessionCookieNames } from "@/auth-config";
@@ -28,6 +28,25 @@ function getRequiredString(
 
 function actionError(): AccountActionState {
   return { error: "操作失败，请稍后重试。" };
+}
+
+function selfChangePasswordError(error: unknown): AccountActionState {
+  if (!(error instanceof StargateApiError)) {
+    return { error: "修改密码失败，请稍后重试。" };
+  }
+
+  switch (error.code) {
+    case "ACCESS_TOKEN_INVALID":
+      return { error: "登录状态已失效，请重新登录。" };
+    case "CURRENT_PASSWORD_INVALID":
+      return { error: "当前密码不正确。" };
+    case "PASSWORD_CHANGE_LOCKED":
+      return { error: "当前密码错误次数过多，请稍后再试。" };
+    case "PASSWORD_INVALID":
+      return { error: "新密码不符合要求。" };
+    default:
+      return { error: "修改密码失败，请稍后重试。" };
+  }
 }
 
 function nextClient() {
@@ -209,7 +228,7 @@ export async function selfChangePasswordAction(
       tenantId
     );
     return { success: true };
-  } catch {
-    return actionError();
+  } catch (error) {
+    return selfChangePasswordError(error);
   }
 }
