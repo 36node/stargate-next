@@ -3,11 +3,13 @@
 import type { ChangeEvent, FormEvent, RefObject } from "react";
 import { useRef, useState, useTransition } from "react";
 
+import { PasswordInput } from "@/packages/ui/components/input";
 import {
   type AccountActionState,
   createAccountAction,
   deleteAccountAction,
   resetAccountPasswordAction,
+  selfChangePasswordAction,
   updateAccountActiveAction,
   updateAccountNameAction,
 } from "./action";
@@ -19,6 +21,73 @@ type AccountActionsProps = {
 };
 
 const initialState: AccountActionState = {};
+
+export function SelfChangePasswordForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [state, setState] = useState(initialState);
+  const [isPending, startTransition] = useTransition();
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    if (formData.get("newPassword") !== formData.get("confirmPassword")) {
+      setState({ error: "两次输入的新密码不一致。" });
+      return;
+    }
+    startTransition(async () => {
+      const nextState = await selfChangePasswordAction(formData);
+      setState(nextState);
+      if (nextState.success) {
+        formRef.current?.reset();
+      }
+    });
+  }
+
+  return (
+    <section aria-labelledby="self-change-password-heading">
+      <form className="dialog-form" onSubmit={handleSubmit} ref={formRef}>
+        <div className="dialog-heading">
+          <h2 id="self-change-password-heading">修改当前登录密码</h2>
+          <p>使用当前登录会话验证并更新自己的密码。</p>
+        </div>
+        <label htmlFor="self-change-current-password">
+          当前密码
+          <PasswordInput
+            autoComplete="current-password"
+            id="self-change-current-password"
+            name="currentPassword"
+            required
+          />
+        </label>
+        <label htmlFor="self-change-new-password">
+          新密码
+          <PasswordInput
+            autoComplete="new-password"
+            id="self-change-new-password"
+            name="newPassword"
+            required
+          />
+        </label>
+        <label htmlFor="self-change-confirm-password">
+          确认新密码
+          <PasswordInput
+            autoComplete="new-password"
+            id="self-change-confirm-password"
+            name="confirmPassword"
+            required
+          />
+        </label>
+        {state.error ? <p className="form-error">{state.error}</p> : null}
+        {state.success ? <p>密码修改成功。</p> : null}
+        <div className="dialog-actions">
+          <button disabled={isPending} type="submit">
+            {isPending ? "修改中…" : "修改密码"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
 
 export function CreateAccountButton({
   allowName = true,

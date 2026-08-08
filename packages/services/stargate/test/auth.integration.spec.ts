@@ -27,6 +27,8 @@ const config: StargateConfig = {
   jwtSecret: "auth-itest-jwt-secret",
   loginAttempts: 5,
   loginLockSeconds: 60,
+  passwordChangeAttempts: 5,
+  passwordChangeLockSeconds: 60,
   primary: { id: "auth-itest-primary", secret: "auth-itest-primary-secret" },
   redisKeyPrefix: `${prefix}:`,
   refreshTtlSeconds: 604_800,
@@ -43,6 +45,11 @@ const config: StargateConfig = {
 };
 
 const service = createStargateService(config);
+const passwordChangeService = createStargateService({
+  ...config,
+  passwordChangeAttempts: 3,
+  passwordChangeLockSeconds: 2,
+});
 const defaultScope = service.resolveApiCredential(config.apiKey, undefined);
 
 function context(operation: string): RequestContext {
@@ -164,6 +171,272 @@ afterAll(async () => {
 });
 
 describe("authentication service integration", () => {
+  it("changes the authenticated account password and preserves only the current session", async () => {
+    const account = await createAccount("self-change-current-password");
+    const current = await login(
+      account.username,
+      account.password,
+      `self-change-current-${sequence}`
+    );
+    const other = await login(
+      account.username,
+      account.password,
+      `self-change-other-${sequence}`
+    );
+    const changeContext = context(`self-change-success-${sequence}`);
+
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${current.accessToken}`,
+        {
+          currentPassword: account.password,
+          newPassword: "self-change-new-password",
+        },
+        changeContext
+      )
+    ).resolves.toBeUndefined();
+
+    await expect(
+      service.refresh(
+        undefined,
+        current.refreshKey,
+        context(`self-change-current-refresh-${sequence}`)
+      )
+    ).resolves.toMatchObject({ sessionId: current.sessionId });
+    await expect(
+      service.refresh(
+        undefined,
+        other.refreshKey,
+        context(`self-change-other-refresh-${sequence}`)
+      )
+    ).rejects.toMatchObject({ code: "REFRESH_INVALID" });
+    await expect(
+      login(
+        account.username,
+        account.password,
+        `self-change-old-login-${sequence}`
+      )
+    ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
+    await expect(
+      login(
+        account.username,
+        "self-change-new-password",
+        `self-change-new-login-${sequence}`
+      )
+    ).resolves.toMatchObject({ accountId: account.id });
+
+    const audit = await db.authAuditEvent.findMany({
+      where: {
+        eventType: "password.self_change",
+        requestId: changeContext.requestId,
+      },
+    });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      accountId: account.id,
+      actorId: account.id,
+      actorType: "account",
+      metadata: { failureCounterCleared: "true" },
+      sessionId: current.sessionId,
+      success: true,
+      tenantId: "default",
+    });
+  });
+
+  it("locks on the threshold request, preserves state, and recovers after ttl", async () => {
+    const account = await createAccount("self-change-lock-password");
+    const tokens = await login(
+      account.username,
+      account.password,
+      `self-change-lock-login-${sequence}`
+    );
+    const failureKey = redisKey("password-change-failure", account.id);
+    const codes: string[] = [];
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const requestContext = context(
+        `self-change-lock-wrong-${attempt}-${sequence}`
+      );
+      const error = await rejected(
+        passwordChangeService.selfChangePassword(
+          undefined,
+          `Bearer ${tokens.accessToken}`,
+          {
+            currentPassword: "wrong-password",
+            newPassword: "self-change-lock-new-password",
+          },
+          requestContext
+        )
+      );
+      codes.push(error.code);
+      const audits = await db.authAuditEvent.findMany({
+        where: {
+          eventType: "password.self_change",
+          requestId: requestContext.requestId,
+        },
+      });
+      expect(audits).toHaveLength(1);
+      expect(audits[0]?.metadata).toEqual({
+        reason:
+          attempt === 3 ? "password_change_locked" : "current_password_invalid",
+      });
+    }
+    expect(codes).toEqual([
+      "CURRENT_PASSWORD_INVALID",
+      "CURRENT_PASSWORD_INVALID",
+      "PASSWORD_CHANGE_LOCKED",
+    ]);
+    expect(await getRedisClient().get(failureKey)).toBe("3");
+
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${tokens.accessToken}`,
+        {
+          currentPassword: account.password,
+          newPassword: "self-change-lock-new-password",
+        },
+        context(`self-change-lock-correct-${sequence}`)
+      )
+    ).rejects.toMatchObject({ code: "PASSWORD_CHANGE_LOCKED" });
+    await expect(
+      service.refresh(
+        undefined,
+        tokens.refreshKey,
+        context(`self-change-lock-refresh-${sequence}`)
+      )
+    ).resolves.toMatchObject({ sessionId: tokens.sessionId });
+    await expect(
+      login(
+        account.username,
+        account.password,
+        `self-change-lock-password-unchanged-${sequence}`
+      )
+    ).resolves.toMatchObject({ accountId: account.id });
+
+    await waitUntilExpired(failureKey);
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${tokens.accessToken}`,
+        {
+          currentPassword: account.password,
+          newPassword: "self-change-lock-new-password",
+        },
+        context(`self-change-lock-recovered-${sequence}`)
+      )
+    ).resolves.toBeUndefined();
+    expect(await getRedisClient().get(failureKey)).toBeNull();
+  });
+
+  it("rejects invalid self-change bodies without incrementing failures", async () => {
+    const account = await createAccount("self-change-body-password");
+    const tokens = await login(
+      account.username,
+      account.password,
+      `self-change-body-login-${sequence}`
+    );
+    const failureKey = redisKey("password-change-failure", account.id);
+    const invalidBodies: unknown[] = [
+      null,
+      [],
+      {},
+      { currentPassword: account.password },
+      { currentPassword: "", newPassword: "new-password" },
+      {
+        currentPassword: account.password,
+        newPassword: account.password,
+      },
+      {
+        accountId: account.id,
+        currentPassword: account.password,
+        newPassword: "new-password",
+      },
+    ];
+
+    for (const [index, body] of invalidBodies.entries()) {
+      await expect(
+        passwordChangeService.selfChangePassword(
+          undefined,
+          `Bearer ${tokens.accessToken}`,
+          body,
+          context(`self-change-invalid-body-${index}-${sequence}`)
+        )
+      ).rejects.toMatchObject({ code: "PASSWORD_INVALID" });
+      expect(await getRedisClient().get(failureKey)).toBeNull();
+    }
+  });
+
+  it("clears a below-threshold failure counter after success", async () => {
+    const account = await createAccount("self-change-clear-password");
+    const tokens = await login(
+      account.username,
+      account.password,
+      `self-change-clear-login-${sequence}`
+    );
+    const failureKey = redisKey("password-change-failure", account.id);
+
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${tokens.accessToken}`,
+        {
+          currentPassword: "wrong-password",
+          newPassword: "self-change-clear-new-password",
+        },
+        context(`self-change-clear-wrong-${sequence}`)
+      )
+    ).rejects.toMatchObject({ code: "CURRENT_PASSWORD_INVALID" });
+    expect(await getRedisClient().get(failureKey)).toBe("1");
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${tokens.accessToken}`,
+        {
+          currentPassword: account.password,
+          newPassword: "self-change-clear-new-password",
+        },
+        context(`self-change-clear-success-${sequence}`)
+      )
+    ).resolves.toBeUndefined();
+    expect(await getRedisClient().get(failureKey)).toBeNull();
+  });
+
+  it("prioritizes account availability over lock and body checks", async () => {
+    const account = await createAccount("self-change-disabled-password");
+    const tokens = await login(
+      account.username,
+      account.password,
+      `self-change-disabled-login-${sequence}`
+    );
+    const failureKey = redisKey("password-change-failure", account.id);
+    await getRedisClient().set(failureKey, "3", "EX", 60);
+    await db.account.update({
+      data: { status: "disabled" },
+      where: { id: account.id },
+    });
+    const requestContext = context(`self-change-disabled-${sequence}`);
+
+    await expect(
+      passwordChangeService.selfChangePassword(
+        undefined,
+        `Bearer ${tokens.accessToken}`,
+        null,
+        requestContext
+      )
+    ).rejects.toMatchObject({ code: "ACCESS_TOKEN_INVALID" });
+    expect(await getRedisClient().get(failureKey)).toBe("3");
+    const audits = await db.authAuditEvent.findMany({
+      where: {
+        eventType: "password.self_change",
+        requestId: requestContext.requestId,
+      },
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.metadata).toEqual({ reason: "account_unavailable" });
+  });
+
   it("keeps captcha verification atomic, bounded, and expiry-aware", async () => {
     const ip = "198.51.100.21";
     const once = await captcha(ip);

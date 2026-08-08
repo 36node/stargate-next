@@ -9,6 +9,7 @@ import {
   AccountActions,
   AccountStatusSwitch,
   CreateAccountButton,
+  SelfChangePasswordForm,
 } from "./account-actions";
 
 type Account = {
@@ -82,6 +83,10 @@ export default async function AccountsPage({
             />
           </div>
         </div>
+
+        {env.STARGATE_AUTH_BACKEND === "next" ? (
+          <SelfChangePasswordForm />
+        ) : null}
 
         {users.length === 0 ? (
           <p className="empty-state">当前没有账号。</p>

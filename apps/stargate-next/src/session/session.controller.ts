@@ -136,6 +136,17 @@ export class SessionController {
     );
   }
 
+  @Post("auth/password")
+  @HttpCode(204)
+  async selfChangePassword(@Body() rawBody: unknown, @Req() request: Request) {
+    await this.service.selfChangePassword(
+      tenantHeader(request),
+      request.header("authorization"),
+      rawBody,
+      requestContext(request)
+    );
+  }
+
   @Get("accounts/:accountId/sessions")
   async listSessions(
     @Param("accountId") accountId: string,

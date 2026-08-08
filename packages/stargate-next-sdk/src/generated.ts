@@ -14,6 +14,8 @@ export type CreateTenantInput = components["schemas"]["CreateTenantInput"];
 export type ErrorCode = components["schemas"]["ErrorCode"];
 export type PatchAccountInput = components["schemas"]["PatchAccountInput"];
 export type PatchTenantInput = components["schemas"]["PatchTenantInput"];
+export type SelfChangePasswordInput =
+  components["schemas"]["SelfChangePasswordInput"];
 export type Session = components["schemas"]["Session"];
 export type Tenant = components["schemas"]["Tenant"];
 export type TenantApiKey = components["schemas"]["TenantApiKey"];
@@ -148,6 +150,20 @@ export class StargateNextClient {
   logout(accessToken: string, tenantId?: string) {
     return this.request<void>("/v1/auth/logout", "POST", {
       accessToken,
+      tenantId,
+      tenantScoped: true,
+    });
+  }
+
+  selfChangePassword(
+    accessToken: string,
+    currentPassword: string,
+    newPassword: string,
+    tenantId?: string
+  ) {
+    return this.request<void>("/v1/auth/password", "POST", {
+      accessToken,
+      body: { currentPassword, newPassword },
       tenantId,
       tenantScoped: true,
     });

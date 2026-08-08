@@ -5,6 +5,11 @@ import { randomUUID } from "node:crypto";
 import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
 
+import { sessionCookieNames } from "@/auth-config";
+import {
+  getSessionTokenFromCookie,
+  getTenantFromCookie,
+} from "@/packages/next-stargate/cookie";
 import { auth } from "@/packages/services/auth/client";
 import { env } from "@/packages/services/env";
 
@@ -165,6 +170,44 @@ export async function resetAccountPasswordAction(
     } else {
       await auth.updatePassword({ body: { newPassword }, path: { userId } });
     }
+    return { success: true };
+  } catch {
+    return actionError();
+  }
+}
+
+export async function selfChangePasswordAction(
+  formData: FormData
+): Promise<AccountActionState> {
+  const currentPassword = getRequiredString(formData, "currentPassword");
+  const newPassword = getRequiredString(formData, "newPassword");
+  const confirmPassword = getRequiredString(formData, "confirmPassword");
+
+  if (!(currentPassword && newPassword && confirmPassword)) {
+    return { error: "请填写当前密码和新密码。" };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "两次输入的新密码不一致。" };
+  }
+  if (env.STARGATE_AUTH_BACKEND !== "next") {
+    return { error: "当前认证后端不支持自助改密。" };
+  }
+
+  const token = await getSessionTokenFromCookie(sessionCookieNames.token);
+  if (!token) {
+    return { error: "登录状态已失效，请重新登录。" };
+  }
+  const tenantId = sessionCookieNames.tenant
+    ? await getTenantFromCookie(sessionCookieNames.tenant)
+    : undefined;
+
+  try {
+    await nextClient().selfChangePassword(
+      token,
+      currentPassword,
+      newPassword,
+      tenantId
+    );
     return { success: true };
   } catch {
     return actionError();

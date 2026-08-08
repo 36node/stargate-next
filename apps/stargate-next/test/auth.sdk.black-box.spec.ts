@@ -58,6 +58,30 @@ async function expectApiError(
 }
 
 describe("authentication SDK", () => {
+  it("changes a password with Bearer auth and no API key", async () => {
+    const adminSdk = client("203.0.113.15");
+    const created = await account(adminSdk, "sdk-self-change-password");
+    const tokens = await login(
+      adminSdk,
+      created.username,
+      "sdk-self-change-password"
+    );
+    const bearerSdk = new StargateNextClient(endpoint, {
+      fetch: withForwardedFor("203.0.113.16"),
+    });
+
+    await expect(
+      bearerSdk.selfChangePassword(
+        tokens.accessToken,
+        "sdk-self-change-password",
+        "sdk-self-change-new-password"
+      )
+    ).resolves.toBeUndefined();
+    await expect(
+      login(adminSdk, created.username, "sdk-self-change-new-password")
+    ).resolves.toMatchObject({ accountId: created.id });
+  });
+
   it("creates and consumes a captcha once", async () => {
     const sdk = client("203.0.113.10");
     const captcha = await sdk.createCaptcha();

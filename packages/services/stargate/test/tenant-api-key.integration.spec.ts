@@ -25,6 +25,8 @@ const config: StargateConfig = {
   jwtSecret: `${prefix}-jwt-secret`,
   loginAttempts: 5,
   loginLockSeconds: 60,
+  passwordChangeAttempts: 5,
+  passwordChangeLockSeconds: 60,
   primary: { id: `${prefix}-refresh`, secret: `${prefix}-refresh-secret` },
   redisKeyPrefix: `${prefix}:`,
   refreshTtlSeconds: 604_800,

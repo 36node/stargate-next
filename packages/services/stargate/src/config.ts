@@ -15,6 +15,8 @@ export type StargateConfig = {
   jwtSecret: string;
   loginAttempts: number;
   loginLockSeconds: number;
+  passwordChangeAttempts: number;
+  passwordChangeLockSeconds: number;
   primary: { id: string; secret: string };
   redisKeyPrefix: string;
   refreshTtlSeconds: number;
@@ -203,6 +205,16 @@ export function loadStargateConfig(
     jwtSecret,
     loginAttempts: positiveInteger(environment, "LOGIN_MAX_ATTEMPTS", "5"),
     loginLockSeconds: positiveInteger(environment, "LOGIN_LOCK_SECONDS", "60"),
+    passwordChangeAttempts: positiveInteger(
+      environment,
+      "PASSWORD_CHANGE_MAX_ATTEMPTS",
+      "5"
+    ),
+    passwordChangeLockSeconds: positiveInteger(
+      environment,
+      "PASSWORD_CHANGE_LOCK_SECONDS",
+      "60"
+    ),
     primary,
     redisKeyPrefix: environment.REDIS_KEY_PREFIX ?? "stargate-next:",
     refreshTtlSeconds: positiveInteger(

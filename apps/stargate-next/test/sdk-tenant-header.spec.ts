@@ -4,6 +4,36 @@ import { StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 describe("StargateNextClient Tenant headers", () => {
+  it("keeps API keys off Bearer self-change requests", async () => {
+    const fetchImpl = vi.fn(
+      (input: string | URL | Request, init?: RequestInit) => {
+        const request = new Request(input, init);
+        expect(new URL(request.url).pathname).toBe("/v1/auth/password");
+        expect(request.method).toBe("POST");
+        expect(request.headers.get("authorization")).toBe(
+          "Bearer access-token"
+        );
+        expect(request.headers.get("x-api-key")).toBeNull();
+        expect(request.headers.get("x-tenant-id")).toBe("test");
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+    );
+    const client = new StargateNextClient("https://stargate.example", {
+      apiKey: "admin-key",
+      fetch: fetchImpl as typeof fetch,
+      tenantId: "test",
+    });
+
+    await expect(
+      client.selfChangePassword(
+        "access-token",
+        "current-password",
+        "new-password"
+      )
+    ).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("inherits and overrides Tenant only for tenant-scoped operations", async () => {
     const headers: Array<{ path: string; tenant: string | null }> = [];
     const fetchImpl = vi.fn(
