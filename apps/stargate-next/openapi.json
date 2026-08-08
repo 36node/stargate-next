@@ -78,6 +78,22 @@
         }
       }
     },
+    "/v1/auth/password": {
+      "post": {
+        "operationId": "selfChangePassword",
+        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
+        "security": [{ "bearerAccessToken": [] }],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/SelfChangePassword"
+        },
+        "responses": {
+          "204": { "description": "password changed" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/v1/accounts": {
       "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
       "get": {
@@ -471,6 +487,16 @@
           }
         }
       },
+      "SelfChangePassword": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SelfChangePasswordInput"
+            }
+          }
+        }
+      },
       "CreateTenant": {
         "required": true,
         "content": {
@@ -522,6 +548,7 @@
           "CAPTCHA_ID_INVALID",
           "CAPTCHA_INVALID",
           "CAPTCHA_RATE_LIMITED",
+          "CURRENT_PASSWORD_INVALID",
           "EMAIL_INVALID",
           "IDEMPOTENCY_CONFLICT",
           "IDEMPOTENCY_IN_PROGRESS",
@@ -529,6 +556,7 @@
           "LOGIN_INVALID",
           "LOGIN_LOCKED",
           "PAGE_INVALID",
+          "PASSWORD_CHANGE_LOCKED",
           "PASSWORD_INVALID",
           "PATCH_INVALID",
           "PHONE_INVALID",
@@ -614,6 +642,15 @@
         "type": "object",
         "required": ["password"],
         "properties": { "password": { "type": "string", "writeOnly": true } }
+      },
+      "SelfChangePasswordInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": { "type": "string", "writeOnly": true },
+          "newPassword": { "type": "string", "writeOnly": true }
+        }
       },
       "AuthTokens": {
         "type": "object",

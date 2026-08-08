@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import type {
   Account,
   AccountCollection,
@@ -9,6 +12,7 @@ import type {
   PatchAccountInput,
   PatchTenantInput,
   ErrorCode as SdkErrorCode,
+  SelfChangePasswordInput,
   Session,
   Tenant,
   TenantApiKey,
@@ -108,9 +112,38 @@ type _TenantApiKeyPatchInputKeys = Assert<
 type _TenantApiKeyCollectionKeys = Assert<
   SameKeys<ServiceTenantApiKeyCollection, TenantApiKeyCollection>
 >;
+type _SelfChangePasswordInputKeys = Assert<
+  SameKeys<
+    SelfChangePasswordInput,
+    { currentPassword: string; newPassword: string }
+  >
+>;
 
 describe("service contracts", () => {
   it("are represented by the generated OpenAPI types", () => {
     expect(true).toBe(true);
+  });
+
+  it("keeps the self-change password schema strict", () => {
+    const specification = JSON.parse(
+      readFileSync(resolve(process.cwd(), "openapi.json"), "utf8")
+    ) as {
+      components: {
+        schemas: {
+          SelfChangePasswordInput: {
+            additionalProperties?: boolean;
+            properties?: Record<string, unknown>;
+            required?: string[];
+          };
+        };
+      };
+    };
+    const schema = specification.components.schemas.SelfChangePasswordInput;
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toEqual(["currentPassword", "newPassword"]);
+    expect(Object.keys(schema.properties ?? {})).toEqual([
+      "currentPassword",
+      "newPassword",
+    ]);
   });
 });

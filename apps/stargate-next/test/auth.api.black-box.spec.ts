@@ -1,5 +1,5 @@
 /** 运行中 Stargate Next 的认证 HTTP 契约黑盒回归。 */
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -16,9 +16,39 @@ type Tokens = {
 };
 
 const captchaCode = env("CAPTCHA_TEST_CODE").trim().toUpperCase();
+const passwordChangeAttempts = positiveIntegerEnv(
+  "PASSWORD_CHANGE_MAX_ATTEMPTS"
+);
+const passwordChangeLockSeconds = positiveIntegerEnv(
+  "PASSWORD_CHANGE_LOCK_SECONDS"
+);
+const passwordChangePollBudgetMs = passwordChangeLockSeconds * 1000 + 5000;
+const passwordChangeThresholdCodes = Array.from(
+  { length: passwordChangeAttempts },
+  (_, index) =>
+    index === passwordChangeAttempts - 1
+      ? "PASSWORD_CHANGE_LOCKED"
+      : "CURRENT_PASSWORD_INVALID"
+);
 const SENSITIVE_SESSION_PATTERN = /refreshKey|hash/i;
+const SELF_CHANGE_MISMATCH_TENANT_ID = "self-change-mismatch";
 const serviceApiKey = env("STARGATE_API_KEY");
 const wrongApiKey = `${serviceApiKey[0] === "x" ? "y" : "x"}${serviceApiKey.slice(1)}`;
+const selfChangeIpNamespace = randomBytes(2).toString("hex");
+let selfChangeIpSequence = 0;
+
+function positiveIntegerEnv(name: string): number {
+  const value = Number(env(name));
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer for black-box tests`);
+  }
+  return value;
+}
+
+function nextSelfChangeIp(): string {
+  selfChangeIpSequence += 1;
+  return `2001:db8:${selfChangeIpNamespace}::${selfChangeIpSequence}`;
+}
 
 function encodeJson(value: unknown) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -99,6 +129,422 @@ function expectError(
 }
 
 describe("authentication API", () => {
+  it("changes a password while preserving only the current session", async () => {
+    const account = await createAccount("api-self-change-password");
+    const currentLogin = await loginAccount(
+      account.username,
+      "api-self-change-password",
+      nextSelfChangeIp()
+    );
+    const otherLogin = await loginAccount(
+      account.username,
+      "api-self-change-password",
+      nextSelfChangeIp()
+    );
+    const current = currentLogin.body as Tokens;
+    const other = otherLogin.body as Tokens;
+
+    expect(
+      (
+        await request("/v1/auth/password", "POST", {
+          accessToken: current.accessToken,
+          body: {
+            currentPassword: "api-self-change-password",
+            newPassword: "api-self-change-new-password",
+          },
+        })
+      ).status
+    ).toBe(204);
+    expect(
+      (
+        await request("/v1/auth/refresh", "POST", {
+          body: { refreshKey: current.refreshKey },
+          forwardedFor: nextSelfChangeIp(),
+        })
+      ).status
+    ).toBe(200);
+    expectError(
+      await request("/v1/auth/refresh", "POST", {
+        body: { refreshKey: other.refreshKey },
+        forwardedFor: nextSelfChangeIp(),
+      }),
+      401,
+      "REFRESH_INVALID"
+    );
+    expectError(
+      await loginAccount(
+        account.username,
+        "api-self-change-password",
+        nextSelfChangeIp()
+      ),
+      401,
+      "LOGIN_INVALID"
+    );
+    expect(
+      (
+        await loginAccount(
+          account.username,
+          "api-self-change-new-password",
+          nextSelfChangeIp()
+        )
+      ).status
+    ).toBe(200);
+  });
+
+  it("requires Bearer auth and rejects Tenant mismatch without side effects", async () => {
+    const password = "api-self-change-auth-password";
+    const account = await createAccount(password);
+    const loggedIn = await loginAccount(
+      account.username,
+      password,
+      nextSelfChangeIp()
+    );
+    const tokens = loggedIn.body as Tokens;
+    const body = {
+      currentPassword: password,
+      newPassword: "api-self-change-auth-new-password",
+    };
+
+    expectError(
+      await request("/v1/auth/password", "POST", { body }),
+      401,
+      "ACCESS_TOKEN_INVALID"
+    );
+    expectError(
+      await request("/v1/auth/password", "POST", {
+        body,
+        service: true,
+      }),
+      401,
+      "ACCESS_TOKEN_INVALID"
+    );
+    const forged = `${tokens.accessToken.slice(0, -1)}${tokens.accessToken.endsWith("a") ? "b" : "a"}`;
+    expectError(
+      await request("/v1/auth/password", "POST", {
+        accessToken: forged,
+        body,
+      }),
+      401,
+      "ACCESS_TOKEN_INVALID"
+    );
+
+    const tenantCreation = await request("/v1/tenants", "POST", {
+      adminKey: true,
+      body: {
+        id: SELF_CHANGE_MISMATCH_TENANT_ID,
+        name: "Self-change mismatch tenant",
+      },
+    });
+    if (tenantCreation.status !== 201) {
+      expectError(tenantCreation, 409, "TENANT_ALREADY_EXISTS");
+    }
+    expect(
+      (
+        await request(
+          `/v1/tenants/${SELF_CHANGE_MISMATCH_TENANT_ID}`,
+          "PATCH",
+          {
+            adminKey: true,
+            body: { status: "active" },
+          }
+        )
+      ).status
+    ).toBe(200);
+    expectError(
+      await request("/v1/auth/password", "POST", {
+        accessToken: tokens.accessToken,
+        body,
+        tenantIdHeader: SELF_CHANGE_MISMATCH_TENANT_ID,
+      }),
+      401,
+      "ACCESS_TOKEN_INVALID"
+    );
+    expect(
+      (await loginAccount(account.username, password, nextSelfChangeIp()))
+        .status
+    ).toBe(200);
+    expect(
+      (
+        await request("/v1/auth/refresh", "POST", {
+          body: { refreshKey: tokens.refreshKey },
+          forwardedFor: nextSelfChangeIp(),
+        })
+      ).status
+    ).toBe(200);
+
+    const thresholdCodes: string[] = [];
+    for (let attempt = 0; attempt < passwordChangeAttempts; attempt += 1) {
+      const response = await request("/v1/auth/password", "POST", {
+        accessToken: tokens.accessToken,
+        body: {
+          currentPassword: "wrong-password",
+          newPassword: "unused-password",
+        },
+      });
+      thresholdCodes.push((response.body as ErrorBody).code);
+    }
+    expect(thresholdCodes).toEqual(passwordChangeThresholdCodes);
+  });
+
+  it("checks lock state before every body shape", async () => {
+    const bodies: unknown[] = [
+      undefined,
+      null,
+      [],
+      {},
+      {
+        currentPassword: "locked-body-password",
+        newPassword: "locked-body-new-password",
+      },
+    ];
+
+    for (const targetBody of bodies) {
+      const account = await createAccount("locked-body-password");
+      const loggedIn = await loginAccount(
+        account.username,
+        "locked-body-password",
+        nextSelfChangeIp()
+      );
+      const tokens = loggedIn.body as Tokens;
+      for (const [
+        attempt,
+        expectedCode,
+      ] of passwordChangeThresholdCodes.entries()) {
+        const response = await request("/v1/auth/password", "POST", {
+          accessToken: tokens.accessToken,
+          body: {
+            currentPassword: `wrong-password-${attempt}`,
+            newPassword: "unused-password",
+          },
+        });
+        expectError(
+          response,
+          expectedCode === "PASSWORD_CHANGE_LOCKED" ? 429 : 401,
+          expectedCode
+        );
+      }
+      const options =
+        targetBody === undefined
+          ? { accessToken: tokens.accessToken }
+          : { accessToken: tokens.accessToken, body: targetBody };
+      expectError(
+        await request("/v1/auth/password", "POST", options),
+        429,
+        "PASSWORD_CHANGE_LOCKED"
+      );
+    }
+  });
+
+  it("rejects unlocked invalid bodies and target-field injection without counting", async () => {
+    const invalidBodies: unknown[] = [undefined, null, [], {}];
+    for (const targetBody of invalidBodies) {
+      const account = await createAccount("unlocked-body-password");
+      const loggedIn = await loginAccount(
+        account.username,
+        "unlocked-body-password",
+        nextSelfChangeIp()
+      );
+      const tokens = loggedIn.body as Tokens;
+      const options =
+        targetBody === undefined
+          ? { accessToken: tokens.accessToken }
+          : { accessToken: tokens.accessToken, body: targetBody };
+      expectError(
+        await request("/v1/auth/password", "POST", options),
+        400,
+        "PASSWORD_INVALID"
+      );
+      expect(
+        (
+          await request("/v1/auth/password", "POST", {
+            accessToken: tokens.accessToken,
+            body: {
+              currentPassword: "unlocked-body-password",
+              newPassword: "unlocked-body-new-password",
+            },
+          })
+        ).status
+      ).toBe(204);
+    }
+
+    const victim = await createAccount("injection-victim-password");
+    const victimLogin = await loginAccount(
+      victim.username,
+      "injection-victim-password",
+      nextSelfChangeIp()
+    );
+    const victimTokens = victimLogin.body as Tokens;
+    const attacker = await createAccount("injection-attacker-password");
+    const attackerLogin = await loginAccount(
+      attacker.username,
+      "injection-attacker-password",
+      nextSelfChangeIp()
+    );
+    const attackerTokens = attackerLogin.body as Tokens;
+    for (const [field, value] of [
+      ["accountId", victim.id],
+      ["tenantId", "default"],
+      ["sessionId", victimTokens.sessionId],
+    ] as const) {
+      expectError(
+        await request("/v1/auth/password", "POST", {
+          accessToken: attackerTokens.accessToken,
+          body: {
+            currentPassword: "injection-attacker-password",
+            newPassword: "injection-attacker-new-password",
+            [field]: value,
+          },
+        }),
+        400,
+        "PASSWORD_INVALID"
+      );
+    }
+    expect(
+      (
+        await loginAccount(
+          victim.username,
+          "injection-victim-password",
+          nextSelfChangeIp()
+        )
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await request("/v1/auth/refresh", "POST", {
+          body: { refreshKey: victimTokens.refreshKey },
+          forwardedFor: nextSelfChangeIp(),
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await loginAccount(
+          attacker.username,
+          "injection-attacker-password",
+          nextSelfChangeIp()
+        )
+      ).status
+    ).toBe(200);
+  });
+
+  it(
+    "recovers from password-change lock expiry using polling",
+    async () => {
+      const account = await createAccount("threshold-ttl-password");
+      const loggedIn = await loginAccount(
+        account.username,
+        "threshold-ttl-password",
+        nextSelfChangeIp()
+      );
+      const tokens = loggedIn.body as Tokens;
+      for (const [
+        attempt,
+        expectedCode,
+      ] of passwordChangeThresholdCodes.entries()) {
+        const response = await request("/v1/auth/password", "POST", {
+          accessToken: tokens.accessToken,
+          body: {
+            currentPassword: `wrong-password-${attempt}`,
+            newPassword: "threshold-ttl-new-password",
+          },
+        });
+        expectError(
+          response,
+          expectedCode === "PASSWORD_CHANGE_LOCKED" ? 429 : 401,
+          expectedCode
+        );
+      }
+      expectError(
+        await request("/v1/auth/password", "POST", {
+          accessToken: tokens.accessToken,
+          body: {
+            currentPassword: "threshold-ttl-password",
+            newPassword: "threshold-ttl-new-password",
+          },
+        }),
+        429,
+        "PASSWORD_CHANGE_LOCKED"
+      );
+      expect(
+        (
+          await loginAccount(
+            account.username,
+            "threshold-ttl-password",
+            nextSelfChangeIp()
+          )
+        ).status
+      ).toBe(200);
+
+      const startedAt = Date.now();
+      let changed = false;
+      while (Date.now() - startedAt < passwordChangePollBudgetMs) {
+        const response = await request("/v1/auth/password", "POST", {
+          accessToken: tokens.accessToken,
+          body: {
+            currentPassword: "threshold-ttl-password",
+            newPassword: "threshold-ttl-new-password",
+          },
+        });
+        if (response.status === 204) {
+          changed = true;
+          break;
+        }
+        expectError(response, 429, "PASSWORD_CHANGE_LOCKED");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      expect(changed).toBe(true);
+      expectError(
+        await loginAccount(
+          account.username,
+          "threshold-ttl-password",
+          nextSelfChangeIp()
+        ),
+        401,
+        "LOGIN_INVALID"
+      );
+      expect(
+        (
+          await loginAccount(
+            account.username,
+            "threshold-ttl-new-password",
+            nextSelfChangeIp()
+          )
+        ).status
+      ).toBe(200);
+    },
+    passwordChangePollBudgetMs + 5000
+  );
+
+  it("rejects disabled and deleted accounts before body validation", async () => {
+    for (const mode of ["disabled", "deleted"] as const) {
+      const account = await createAccount(`${mode}-self-change-password`);
+      const loggedIn = await loginAccount(
+        account.username,
+        `${mode}-self-change-password`,
+        nextSelfChangeIp()
+      );
+      const tokens = loggedIn.body as Tokens;
+      const response =
+        mode === "disabled"
+          ? await request(`/v1/accounts/${account.id}`, "PATCH", {
+              body: { active: false },
+              service: true,
+            })
+          : await request(`/v1/accounts/${account.id}`, "DELETE", {
+              service: true,
+            });
+      expect([200, 204]).toContain(response.status);
+      expectError(
+        await request("/v1/auth/password", "POST", {
+          accessToken: tokens.accessToken,
+          body: null,
+        }),
+        401,
+        "ACCESS_TOKEN_INVALID"
+      );
+    }
+  });
+
   it("completes login, refresh, and logout with exact JWT contracts", async () => {
     const account = await createAccount("auth-loop-password");
     const login = await loginAccount(

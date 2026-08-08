@@ -164,6 +164,8 @@ jobs:
           CAPTCHA_TEST_MODE: "true"
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
           NODE_ENV: test
+          PASSWORD_CHANGE_LOCK_SECONDS: "10"
+          PASSWORD_CHANGE_MAX_ATTEMPTS: "3"
           STARGATE_ADMIN_API_KEY: ci-admin-api-key
           STARGATE_JWT_SECRET: ci-jwt-secret
           REDIS_URL: redis://localhost:6379

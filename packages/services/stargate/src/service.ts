@@ -20,7 +20,11 @@ import {
 } from "@repo/redis";
 import svgCaptcha from "svg-captcha";
 
-import { signAccessToken, verifyAuthorizationHeader } from "./access-token";
+import {
+  ACCESS_TOKEN_INVALID_MESSAGE,
+  signAccessToken,
+  verifyAuthorizationHeader,
+} from "./access-token";
 import { loadStargateConfig, type StargateConfig } from "./config";
 import type {
   AccessTokenClaims,
@@ -60,6 +64,7 @@ const TENANT_API_KEY_PREFIX = "stk_";
 const CAPTCHA_PREFIX = "captcha:";
 const CAPTCHA_RATE_LIMIT_PREFIX = "captcha-rate-limit:";
 const LOGIN_FAILURE_PREFIX = "login-failure:";
+const PASSWORD_CHANGE_FAILURE_PREFIX = "password-change-failure:";
 const SALT_ALPHABET =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const CAPTCHA_CHAR_PRESET = "abcd1234abcd1234HJKLMNPQRSTUVWXYZ23456789";
@@ -69,6 +74,14 @@ const PHONE_PATTERN = /^\+?\d+$/;
 const PASSWORD_HASH_PATTERN = /^[a-zA-Z0-9]{13}[a-f0-9]{32}$/;
 const LETTER_PATTERN = /^[a-zA-Z]/;
 const LOGIN_FAILURE_SCRIPT = `local count = redis.call("INCR", KEYS[1])
+if count == 1 or count >= tonumber(ARGV[1]) then
+  redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
+end
+return count`;
+// 自改锁与登录锁刻意保留独立脚本、配置和 key：登录锁是第 N 次仍返回
+// LOGIN_INVALID、第 N+1 次才返回 LOGIN_LOCKED；自改锁在第 N 次错误时即返回
+// PASSWORD_CHANGE_LOCKED。二者的阈值语义必须独立演进。
+const PASSWORD_CHANGE_FAILURE_SCRIPT = `local count = redis.call("INCR", KEYS[1])
 if count == 1 or count >= tonumber(ARGV[1]) then
   redis.call("EXPIRE", KEYS[1], tonumber(ARGV[2]))
 end
@@ -145,6 +158,33 @@ function requiredString(
     throw serviceError(code, message, "invalid_argument");
   }
   return value;
+}
+
+function allowedKeysOnly(body: Record<string, unknown>, keys: string[]): void {
+  const allowed = new Set(keys);
+  if (Object.keys(body).some((key) => !allowed.has(key))) {
+    throw serviceError(
+      "PASSWORD_INVALID",
+      "request body contains unsupported fields",
+      "invalid_argument"
+    );
+  }
+}
+
+function plainObject(value: unknown): Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    throw serviceError(
+      "PASSWORD_INVALID",
+      "request body must be a JSON object",
+      "invalid_argument"
+    );
+  }
+  return value as Record<string, unknown>;
 }
 
 function normalizeUsername(value: string): string {
@@ -671,6 +711,25 @@ export class StargateService implements StargateServiceContract {
 
   private audit(input: AuditInput): Promise<void> {
     return this.writeAudit(db, input);
+  }
+
+  private selfChangePasswordAudit(
+    claims: AccessTokenClaims,
+    tenantId: string,
+    context: RequestContext,
+    reason: string
+  ): Promise<void> {
+    return this.audit({
+      accountId: claims.accountId,
+      actorId: claims.accountId,
+      actorType: "account",
+      context,
+      eventType: "password.self_change",
+      metadata: { reason },
+      sessionId: claims.sessionId,
+      success: false,
+      tenantId,
+    });
   }
 
   private async resolvePublicTenant(
@@ -1418,6 +1477,186 @@ export class StargateService implements StargateServiceContract {
       context,
       eventType: "logout",
       metadata: { reason: "logout" },
+      sessionId: claims.sessionId,
+      success: true,
+      tenantId,
+    });
+  }
+
+  async selfChangePassword(
+    tenantHeader: string | undefined,
+    authorization: string | undefined,
+    rawBody: unknown,
+    context: RequestContext
+  ): Promise<void> {
+    let tenantId: string;
+    try {
+      tenantId = this.parseTenantHeader(tenantHeader) ?? DEFAULT_TENANT_ID;
+    } catch {
+      throw serviceError(
+        "ACCESS_TOKEN_INVALID",
+        ACCESS_TOKEN_INVALID_MESSAGE,
+        "unauthenticated"
+      );
+    }
+
+    const claims = this.accessTokenClaims(authorization);
+    if (claims.tenantId !== tenantId) {
+      throw serviceError(
+        "ACCESS_TOKEN_INVALID",
+        ACCESS_TOKEN_INVALID_MESSAGE,
+        "unauthenticated"
+      );
+    }
+
+    const account = await db.account.findFirst({
+      where: { id: claims.accountId, tenantId },
+    });
+    if (
+      !account ||
+      account.deletedAt ||
+      account.status !== "active" ||
+      account.passwordAlgorithm !== "legacy-md5"
+    ) {
+      await this.selfChangePasswordAudit(
+        claims,
+        tenantId,
+        context,
+        "account_unavailable"
+      );
+      throw serviceError(
+        "ACCESS_TOKEN_INVALID",
+        ACCESS_TOKEN_INVALID_MESSAGE,
+        "unauthenticated"
+      );
+    }
+
+    const failureKey = this.redisKey(
+      PASSWORD_CHANGE_FAILURE_PREFIX,
+      tenantId,
+      claims.accountId
+    );
+    const failures = Number(
+      (await withRedisTimeout(getRedisClient().get(failureKey))) ?? "0"
+    );
+    if (failures >= this.settings.passwordChangeAttempts) {
+      await this.selfChangePasswordAudit(
+        claims,
+        tenantId,
+        context,
+        "password_change_locked"
+      );
+      throw serviceError(
+        "PASSWORD_CHANGE_LOCKED",
+        "password change temporarily locked",
+        "rate_limited"
+      );
+    }
+
+    const body = plainObject(rawBody);
+    allowedKeysOnly(body, ["currentPassword", "newPassword"]);
+    const currentPassword = requiredString(
+      body.currentPassword,
+      "PASSWORD_INVALID",
+      "currentPassword is required"
+    );
+    const newPassword = requiredString(
+      body.newPassword,
+      "PASSWORD_INVALID",
+      "newPassword is required"
+    );
+    if (newPassword === currentPassword) {
+      throw serviceError(
+        "PASSWORD_INVALID",
+        "newPassword must differ from currentPassword",
+        "invalid_argument"
+      );
+    }
+
+    if (!verifyPassword(account.passwordHash, currentPassword)) {
+      const count = Number(
+        await withRedisTimeout(
+          getRedisClient().eval(
+            PASSWORD_CHANGE_FAILURE_SCRIPT,
+            1,
+            failureKey,
+            String(this.settings.passwordChangeAttempts),
+            String(this.settings.passwordChangeLockSeconds)
+          )
+        )
+      );
+      if (count >= this.settings.passwordChangeAttempts) {
+        await this.selfChangePasswordAudit(
+          claims,
+          tenantId,
+          context,
+          "password_change_locked"
+        );
+        throw serviceError(
+          "PASSWORD_CHANGE_LOCKED",
+          "password change temporarily locked",
+          "rate_limited"
+        );
+      }
+      await this.selfChangePasswordAudit(
+        claims,
+        tenantId,
+        context,
+        "current_password_invalid"
+      );
+      throw serviceError(
+        "CURRENT_PASSWORD_INVALID",
+        "current password is invalid",
+        "unauthenticated"
+      );
+    }
+
+    await db.$transaction(async (transaction) => {
+      const updated = await transaction.account.updateMany({
+        data: {
+          passwordAlgorithm: "legacy-md5",
+          passwordChangedAt: new Date(),
+          passwordHash: passwordHash(newPassword),
+        },
+        where: {
+          deletedAt: null,
+          id: claims.accountId,
+          passwordAlgorithm: "legacy-md5",
+          passwordHash: account.passwordHash,
+          status: "active",
+          tenantId,
+        },
+      });
+      if (updated.count !== 1) {
+        throw serviceError(
+          "ACCESS_TOKEN_INVALID",
+          ACCESS_TOKEN_INVALID_MESSAGE,
+          "unauthenticated"
+        );
+      }
+      await transaction.session.deleteMany({
+        where: {
+          accountId: claims.accountId,
+          id: { not: claims.sessionId },
+          tenantId,
+        },
+      });
+    });
+
+    let failureCounterCleared = true;
+    try {
+      await withRedisTimeout(getRedisClient().del(failureKey));
+    } catch {
+      // 密码事务已经提交；残留计数依赖既有 TTL 自愈，并通过审计暴露清理结果。
+      failureCounterCleared = false;
+    }
+    await this.audit({
+      accountId: claims.accountId,
+      actorId: claims.accountId,
+      actorType: "account",
+      context,
+      eventType: "password.self_change",
+      metadata: { failureCounterCleared: String(failureCounterCleared) },
       sessionId: claims.sessionId,
       success: true,
       tenantId,

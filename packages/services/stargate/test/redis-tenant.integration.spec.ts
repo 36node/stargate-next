@@ -6,7 +6,11 @@ import { getRedisClient } from "@repo/redis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { StargateConfig } from "../src/config";
-import type { RequestContext, TenantScope } from "../src/contracts";
+import type {
+  PublicAccount,
+  RequestContext,
+  TenantScope,
+} from "../src/contracts";
 import { createStargateService } from "../src/service";
 
 const prefix = `redisitest${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
@@ -27,6 +31,8 @@ const config: StargateConfig = {
   jwtSecret: `${prefix}-jwt-secret`,
   loginAttempts: 2,
   loginLockSeconds: 60,
+  passwordChangeAttempts: 2,
+  passwordChangeLockSeconds: 60,
   primary: { id: `${prefix}-refresh`, secret: `${prefix}-refresh-secret` },
   redisKeyPrefix: `${prefix}:`,
   refreshTtlSeconds: 604_800,
@@ -75,7 +81,11 @@ async function clearRedisPrefix(): Promise<void> {
   } while (cursor !== "0");
 }
 
-async function createSharedAccount(username: string, password: string) {
+async function createSharedAccount(
+  username: string,
+  password: string
+): Promise<{ defaultAccount: PublicAccount; tenantAccount: PublicAccount }> {
+  const created: PublicAccount[] = [];
   for (const scope of [defaultScope, tenantScope]) {
     const account = await service.createAccount(
       scope,
@@ -83,7 +93,13 @@ async function createSharedAccount(username: string, password: string) {
       context(`account-${scope.tenantId}`, "192.0.2.1")
     );
     accountIds.add(account.id);
+    created.push(account);
   }
+  const [defaultAccount, tenantAccount] = created as [
+    PublicAccount,
+    PublicAccount,
+  ];
+  return { defaultAccount, tenantAccount };
 }
 
 async function loginAttempt(
@@ -212,5 +228,135 @@ describe("Tenant-isolated Redis state", () => {
     ).resolves.toMatchObject({ tenantId });
     await expect(getRedisClient().get(tenantFailureKey)).resolves.toBeNull();
     await expect(getRedisClient().get(defaultFailureKey)).resolves.toBe("1");
+  });
+
+  it("isolates password-change failures by Tenant and Account", async () => {
+    const username = `${prefix}selfpwd`;
+    const password = "redis-self-change-password";
+    const { defaultAccount, tenantAccount } = await createSharedAccount(
+      username,
+      password
+    );
+    expect(defaultAccount.id).not.toBe(tenantAccount.id);
+    const defaultTokens = await loginAttempt(
+      "default",
+      username,
+      password,
+      "self-change-default-login"
+    );
+    const tenantTokens = await loginAttempt(
+      tenantId,
+      username,
+      password,
+      "self-change-tenant-login"
+    );
+
+    await expect(
+      service.selfChangePassword(
+        undefined,
+        `Bearer ${defaultTokens.accessToken}`,
+        { currentPassword: "wrong-password", newPassword: "unused-password" },
+        context("self-change-default-wrong-1", "192.0.2.70")
+      )
+    ).rejects.toMatchObject({ code: "CURRENT_PASSWORD_INVALID" });
+    await expect(
+      service.selfChangePassword(
+        undefined,
+        `Bearer ${defaultTokens.accessToken}`,
+        { currentPassword: "wrong-password", newPassword: "unused-password" },
+        context("self-change-default-wrong-2", "192.0.2.71")
+      )
+    ).rejects.toMatchObject({ code: "PASSWORD_CHANGE_LOCKED" });
+
+    const defaultKey = redisKey(
+      "password-change-failure",
+      "default",
+      defaultAccount.id
+    );
+    const tenantKey = redisKey(
+      "password-change-failure",
+      tenantId,
+      tenantAccount.id
+    );
+    await expect(getRedisClient().get(defaultKey)).resolves.not.toBeNull();
+    await expect(getRedisClient().get(tenantKey)).resolves.toBeNull();
+
+    await expect(
+      loginAttempt(
+        "default",
+        username,
+        password,
+        "self-change-login-lock-independent"
+      )
+    ).resolves.toMatchObject({ accountId: defaultAccount.id });
+    await expect(
+      loginAttempt(
+        tenantId,
+        username,
+        "wrong-password",
+        "self-change-tenant-login-failure"
+      )
+    ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
+    await expect(
+      service.selfChangePassword(
+        tenantId,
+        `Bearer ${tenantTokens.accessToken}`,
+        {
+          currentPassword: password,
+          newPassword: "redis-self-change-new-password",
+        },
+        context("self-change-tenant-success", "192.0.2.72")
+      )
+    ).resolves.toBeUndefined();
+    await expect(getRedisClient().get(tenantKey)).resolves.toBeNull();
+  });
+
+  it("allows a valid issued token to self-change after Tenant disablement", async () => {
+    const username = `${prefix}disabledselfpwd`;
+    const password = "redis-disabled-tenant-password";
+    const { tenantAccount } = await createSharedAccount(username, password);
+    const tenantTokens = await loginAttempt(
+      tenantId,
+      username,
+      password,
+      "disabled-tenant-self-change-login"
+    );
+    const original = await db.account.findUniqueOrThrow({
+      where: { id: tenantAccount.id },
+    });
+
+    await service.patchTenant(
+      adminScope,
+      tenantId,
+      { status: "disabled" },
+      context("disabled-tenant-self-change-disable", "192.0.2.73")
+    );
+    try {
+      await expect(
+        service.selfChangePassword(
+          tenantId,
+          `Bearer ${tenantTokens.accessToken}`,
+          {
+            currentPassword: password,
+            newPassword: "redis-disabled-tenant-new-password",
+          },
+          context("disabled-tenant-self-change", "192.0.2.74")
+        )
+      ).resolves.toBeUndefined();
+      const updated = await db.account.findUniqueOrThrow({
+        where: { id: tenantAccount.id },
+      });
+      expect(updated.passwordHash).not.toBe(original.passwordHash);
+      expect(updated.passwordChangedAt.getTime()).toBeGreaterThan(
+        original.passwordChangedAt.getTime()
+      );
+    } finally {
+      await service.patchTenant(
+        adminScope,
+        tenantId,
+        { status: "active" },
+        context("disabled-tenant-self-change-restore", "192.0.2.75")
+      );
+    }
   });
 });

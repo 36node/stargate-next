@@ -157,6 +157,7 @@ export type StargateErrorCode =
   | "CAPTCHA_ID_INVALID"
   | "CAPTCHA_INVALID"
   | "CAPTCHA_RATE_LIMITED"
+  | "CURRENT_PASSWORD_INVALID"
   | "EMAIL_INVALID"
   | "IDEMPOTENCY_CONFLICT"
   | "IDEMPOTENCY_IN_PROGRESS"
@@ -164,6 +165,7 @@ export type StargateErrorCode =
   | "LOGIN_INVALID"
   | "LOGIN_LOCKED"
   | "PAGE_INVALID"
+  | "PASSWORD_CHANGE_LOCKED"
   | "PASSWORD_INVALID"
   | "PATCH_INVALID"
   | "PHONE_INVALID"
@@ -259,6 +261,16 @@ export type StargateServiceContract = {
   logout(
     tenantHeader: string | undefined,
     authorization: string | undefined,
+    context: RequestContext
+  ): Promise<void>;
+  /**
+   * 用户自助修改当前 Account 的密码。
+   * rawBody 必须保持 unknown，由领域服务按安全优先级完成唯一一次 body 校验。
+   */
+  selfChangePassword(
+    tenantHeader: string | undefined,
+    authorization: string | undefined,
+    rawBody: unknown,
     context: RequestContext
   ): Promise<void>;
 

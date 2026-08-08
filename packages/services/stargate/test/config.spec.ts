@@ -19,6 +19,37 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 describe("stargate config", () => {
+  it("loads and overrides self-change password limits", () => {
+    expect(loadStargateConfig(environment())).toMatchObject({
+      passwordChangeAttempts: 5,
+      passwordChangeLockSeconds: 60,
+    });
+    expect(
+      loadStargateConfig(
+        environment({
+          PASSWORD_CHANGE_LOCK_SECONDS: "120",
+          PASSWORD_CHANGE_MAX_ATTEMPTS: "3",
+        })
+      )
+    ).toMatchObject({
+      passwordChangeAttempts: 3,
+      passwordChangeLockSeconds: 120,
+    });
+  });
+
+  it("rejects invalid self-change password limits", () => {
+    for (const name of [
+      "PASSWORD_CHANGE_MAX_ATTEMPTS",
+      "PASSWORD_CHANGE_LOCK_SECONDS",
+    ]) {
+      for (const value of ["0", "-1", "abc"]) {
+        expect(() =>
+          loadStargateConfig(environment({ [name]: value }))
+        ).toThrow(`${name} must be a positive integer`);
+      }
+    }
+  });
+
   it("requires and validates the fixed captcha code", () => {
     expect(() =>
       loadStargateConfig(environment({ CAPTCHA_TEST_MODE: "true" }))

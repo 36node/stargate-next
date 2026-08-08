@@ -42,6 +42,8 @@ describe("stargate service contracts", () => {
       accountCreateIdempotencyTtlSeconds: 3600,
       apiKey: "api-key",
       captchaAttempts: 5,
+      passwordChangeAttempts: 5,
+      passwordChangeLockSeconds: 60,
       redisKeyPrefix: "stargate-next:",
     });
   });

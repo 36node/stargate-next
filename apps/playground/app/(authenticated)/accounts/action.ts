@@ -2,9 +2,14 @@
 
 import { randomUUID } from "node:crypto";
 
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
 
+import { sessionCookieNames } from "@/auth-config";
+import {
+  getSessionTokenFromCookie,
+  getTenantFromCookie,
+} from "@/packages/next-stargate/cookie";
 import { auth } from "@/packages/services/auth/client";
 import { env } from "@/packages/services/env";
 
@@ -23,6 +28,25 @@ function getRequiredString(
 
 function actionError(): AccountActionState {
   return { error: "操作失败，请稍后重试。" };
+}
+
+function selfChangePasswordError(error: unknown): AccountActionState {
+  if (!(error instanceof StargateApiError)) {
+    return { error: "修改密码失败，请稍后重试。" };
+  }
+
+  switch (error.code) {
+    case "ACCESS_TOKEN_INVALID":
+      return { error: "登录状态已失效，请重新登录。" };
+    case "CURRENT_PASSWORD_INVALID":
+      return { error: "当前密码不正确。" };
+    case "PASSWORD_CHANGE_LOCKED":
+      return { error: "当前密码错误次数过多，请稍后再试。" };
+    case "PASSWORD_INVALID":
+      return { error: "新密码不符合要求。" };
+    default:
+      return { error: "修改密码失败，请稍后重试。" };
+  }
 }
 
 function nextClient() {
@@ -168,5 +192,43 @@ export async function resetAccountPasswordAction(
     return { success: true };
   } catch {
     return actionError();
+  }
+}
+
+export async function selfChangePasswordAction(
+  formData: FormData
+): Promise<AccountActionState> {
+  const currentPassword = getRequiredString(formData, "currentPassword");
+  const newPassword = getRequiredString(formData, "newPassword");
+  const confirmPassword = getRequiredString(formData, "confirmPassword");
+
+  if (!(currentPassword && newPassword && confirmPassword)) {
+    return { error: "请填写当前密码和新密码。" };
+  }
+  if (newPassword !== confirmPassword) {
+    return { error: "两次输入的新密码不一致。" };
+  }
+  if (env.STARGATE_AUTH_BACKEND !== "next") {
+    return { error: "当前认证后端不支持自助改密。" };
+  }
+
+  const token = await getSessionTokenFromCookie(sessionCookieNames.token);
+  if (!token) {
+    return { error: "登录状态已失效，请重新登录。" };
+  }
+  const tenantId = sessionCookieNames.tenant
+    ? await getTenantFromCookie(sessionCookieNames.tenant)
+    : undefined;
+
+  try {
+    await nextClient().selfChangePassword(
+      token,
+      currentPassword,
+      newPassword,
+      tenantId
+    );
+    return { success: true };
+  } catch (error) {
+    return selfChangePasswordError(error);
   }
 }

@@ -117,6 +117,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["selfChangePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/accounts": {
         parameters: {
             query?: never;
@@ -294,7 +310,7 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {string} */
-        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "BODY_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "TENANT_ALREADY_EXISTS" | "TENANT_API_KEY_NOT_FOUND" | "TENANT_API_KEY_SELF_DELETE" | "TENANT_DISABLED" | "TENANT_ID_INVALID" | "TENANT_INVALID" | "TENANT_NOT_FOUND" | "USERNAME_INVALID";
+        ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "BODY_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "CURRENT_PASSWORD_INVALID" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_CHANGE_LOCKED" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "TENANT_ALREADY_EXISTS" | "TENANT_API_KEY_NOT_FOUND" | "TENANT_API_KEY_SELF_DELETE" | "TENANT_DISABLED" | "TENANT_ID_INVALID" | "TENANT_INVALID" | "TENANT_NOT_FOUND" | "USERNAME_INVALID";
         LoginInput: {
             login: string;
             password: string;
@@ -331,6 +347,10 @@ export interface components {
         };
         ChangePasswordInput: {
             password: string;
+        };
+        SelfChangePasswordInput: {
+            currentPassword: string;
+            newPassword: string;
         };
         AuthTokens: {
             accessToken: string;
@@ -649,6 +669,11 @@ export interface components {
                 "application/json": components["schemas"]["ChangePasswordInput"];
             };
         };
+        SelfChangePassword: {
+            content: {
+                "application/json": components["schemas"]["SelfChangePasswordInput"];
+            };
+        };
         CreateTenant: {
             content: {
                 "application/json": components["schemas"]["CreateTenantInput"];
@@ -798,6 +823,30 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Error"];
+        };
+    };
+    selfChangePassword: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Target tenant id. Omitted means the built-in `default` tenant. */
+                "x-tenant-id"?: components["parameters"]["TenantHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["SelfChangePassword"];
+        responses: {
+            /** @description password changed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     listAccounts: {
