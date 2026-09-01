@@ -34,7 +34,7 @@
     "svg-captcha": "^1.4.0"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.7",
+    "@nestjs/cli": "^12.0.0",
     "@nestjs/schematics": "^11.0.7",
     "@nestjs/testing": "^11.1.6",
     "@repo/stargate-next-sdk": "workspace:*",
