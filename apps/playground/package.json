@@ -76,7 +76,7 @@
     "@repo/typescript-config": "workspace:*",
     "@storybook/addon-onboarding": "^10.3.5",
     "@storybook/addon-themes": "^10.3.5",
-    "@storybook/nextjs": "^10.3.5",
+    "@storybook/nextjs": "^10.5.10",
     "@storybook/react": "^10.3.5",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/typography": "^0.5.20",
