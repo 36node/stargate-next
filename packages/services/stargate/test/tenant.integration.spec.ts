@@ -224,7 +224,10 @@ describe("Tenant service integration", () => {
 
   it("uses tenant settings to disable login captcha", async () => {
     const tenant = await createTenant("captcha-disabled");
-    const scope = await service.resolveApiCredential(config.apiKey, tenant.id);
+    const scope = await service.resolveApiCredential(
+      config.adminApiKey,
+      tenant.id
+    );
     const account = await service.createAccount(
       scope,
       {
