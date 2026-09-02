@@ -13,6 +13,10 @@ export type ActorType =
 
 export type TenantStatus = "active" | "disabled";
 
+export type TenantSettings = {
+  loginCaptchaRequired?: boolean;
+};
+
 declare const tenantScopeBrand: unique symbol;
 declare const adminScopeBrand: unique symbol;
 
@@ -45,8 +49,8 @@ export type AccountPatchInput = {
 };
 
 export type LoginInput = {
-  captchaCode: string;
-  captchaId: string;
+  captchaCode?: string;
+  captchaId?: string;
   login: string;
   password: string;
 };
@@ -101,12 +105,18 @@ export type PublicTenant = {
   id: string;
   name: string | null;
   status: TenantStatus;
+  settings: TenantSettings;
   updatedAt: string;
 };
 
-export type TenantInput = { id?: string; name?: string | null };
+export type TenantInput = {
+  id?: string;
+  name?: string | null;
+  settings?: TenantSettings;
+};
 export type TenantPatchInput = {
   name?: string | null;
+  settings?: TenantSettings;
   status?: TenantStatus;
 };
 

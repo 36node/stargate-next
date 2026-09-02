@@ -43,7 +43,7 @@ export class TenantController {
       request.header("x-api-key")
     );
     const body = plainObjectBody(rawBody, "BODY_INVALID");
-    allowedKeysOnly(body, ["id", "name"], "BODY_INVALID");
+    allowedKeysOnly(body, ["id", "name", "settings"], "BODY_INVALID");
     let id: string | undefined;
     if (body.id !== undefined) {
       if (typeof body.id !== "string") {
@@ -58,6 +58,9 @@ export class TenantController {
       ...(id !== undefined ? { id } : {}),
       ...(body.name !== undefined
         ? { name: optionalNullableString(body.name, "BODY_INVALID") }
+        : {}),
+      ...(body.settings !== undefined
+        ? { settings: body.settings as TenantInput["settings"] }
         : {}),
     };
     return this.service.createTenant(scope, input, requestContext(request));
@@ -96,7 +99,7 @@ export class TenantController {
       request.header("x-api-key")
     );
     const body = plainObjectBody(rawBody, "PATCH_INVALID");
-    allowedKeysOnly(body, ["name", "status"], "PATCH_INVALID");
+    allowedKeysOnly(body, ["name", "status", "settings"], "PATCH_INVALID");
     const name = optionalNullableString(body.name, "PATCH_INVALID");
     const status = optionalString(body.status, "PATCH_INVALID");
     if (status !== undefined && status !== "active" && status !== "disabled") {
@@ -105,15 +108,22 @@ export class TenantController {
         message: "status must be active or disabled",
       });
     }
-    if (name === undefined && status === undefined) {
+    if (
+      name === undefined &&
+      status === undefined &&
+      body.settings === undefined
+    ) {
       throw new BadRequestException({
         code: "PATCH_INVALID",
-        message: "patch must include name or status",
+        message: "patch must include name, status, or settings",
       });
     }
     const input: TenantPatchInput = {
       ...(name !== undefined ? { name } : {}),
       ...(status !== undefined ? { status: status as TenantStatus } : {}),
+      ...(body.settings !== undefined
+        ? { settings: body.settings as TenantPatchInput["settings"] }
+        : {}),
     };
     return this.service.patchTenant(
       scope,

@@ -87,16 +87,24 @@ export class SessionController {
     return this.service.login(
       tenantHeader(request),
       {
-        captchaCode: requiredString(
-          body?.captchaCode,
-          "CAPTCHA_CODE_INVALID",
-          "captcha code is required"
-        ),
-        captchaId: requiredString(
-          body?.captchaId,
-          "CAPTCHA_ID_INVALID",
-          "captcha id is required"
-        ),
+        ...(body?.captchaCode !== undefined
+          ? {
+              captchaCode: requiredString(
+                body.captchaCode,
+                "CAPTCHA_CODE_INVALID",
+                "captcha code is required"
+              ),
+            }
+          : {}),
+        ...(body?.captchaId !== undefined
+          ? {
+              captchaId: requiredString(
+                body.captchaId,
+                "CAPTCHA_ID_INVALID",
+                "captcha id is required"
+              ),
+            }
+          : {}),
         login: requiredString(
           body?.login,
           "LOGIN_IDENTIFIER_INVALID",

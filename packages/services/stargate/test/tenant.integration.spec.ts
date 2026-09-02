@@ -157,6 +157,7 @@ describe("Tenant service integration", () => {
     expect(created).toMatchObject({
       id: `${prefix}-lifecycle`,
       name: "lifecycle",
+      settings: {},
       status: "active",
     });
     expect(created).not.toHaveProperty("active");
@@ -219,6 +220,51 @@ describe("Tenant service integration", () => {
         where: { eventType: "tenant.enabled", tenantId: created.id },
       })
     ).toBe(1);
+  });
+
+  it("uses tenant settings to disable login captcha", async () => {
+    const tenant = await createTenant("captcha-disabled");
+    const scope = await service.resolveApiCredential(config.apiKey, tenant.id);
+    const account = await service.createAccount(
+      scope,
+      {
+        password: "captcha-disabled-password",
+        username: `${prefix}captcha_disabled`,
+      },
+      context("captcha-disabled-account")
+    );
+    accountIds.add(account.id);
+
+    await expect(
+      service.login(
+        tenant.id,
+        { login: account.username, password: "captcha-disabled-password" },
+        context("captcha-disabled-login-before")
+      )
+    ).rejects.toMatchObject({ code: "CAPTCHA_INVALID" });
+
+    const updated = await service.patchTenant(
+      adminScope,
+      tenant.id,
+      { settings: { loginCaptchaRequired: false } },
+      context("captcha-disabled-settings")
+    );
+    expect(updated.settings).toEqual({ loginCaptchaRequired: false });
+    await expect(
+      service.login(
+        tenant.id,
+        { login: account.username, password: "captcha-disabled-password" },
+        context("captcha-disabled-login-after")
+      )
+    ).resolves.toMatchObject({ accountId: account.id, tenantId: tenant.id });
+    await expect(
+      service.patchTenant(
+        adminScope,
+        tenant.id,
+        { settings: { loginCaptchaRequired: "false" as never } },
+        context("captcha-disabled-invalid-settings")
+      )
+    ).rejects.toMatchObject({ code: "PATCH_INVALID" });
   });
 
   it("uses stable errors for invalid ids, the default reservation, and missing paths", async () => {
