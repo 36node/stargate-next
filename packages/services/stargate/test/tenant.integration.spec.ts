@@ -244,7 +244,7 @@ describe("Tenant service integration", () => {
         { login: account.username, password: "captcha-disabled-password" },
         context("captcha-disabled-login-before")
       )
-    ).rejects.toMatchObject({ code: "CAPTCHA_INVALID" });
+    ).rejects.toMatchObject({ code: "CAPTCHA_CODE_INVALID" });
 
     const updated = await service.patchTenant(
       adminScope,

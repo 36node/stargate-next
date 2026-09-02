@@ -1276,20 +1276,35 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    if (
-      tenantSettingsRequiresCaptcha(tenant.settings) &&
-      !(await this.verifyCaptchaForTenant(
-        tenantId,
-        input.captchaId,
-        input.captchaCode
-      ))
-    ) {
-      await this.loginFailure(failureKey, tenantId, context);
-      throw serviceError(
-        "CAPTCHA_INVALID",
-        "captcha is invalid or expired",
-        "unauthenticated"
-      );
+    if (tenantSettingsRequiresCaptcha(tenant.settings)) {
+      if (input.captchaCode === undefined) {
+        throw serviceError(
+          "CAPTCHA_CODE_INVALID",
+          "captcha code is required",
+          "invalid_argument"
+        );
+      }
+      if (input.captchaId === undefined) {
+        throw serviceError(
+          "CAPTCHA_ID_INVALID",
+          "captcha id is required",
+          "invalid_argument"
+        );
+      }
+      if (
+        !(await this.verifyCaptchaForTenant(
+          tenantId,
+          input.captchaId,
+          input.captchaCode
+        ))
+      ) {
+        await this.loginFailure(failureKey, tenantId, context);
+        throw serviceError(
+          "CAPTCHA_INVALID",
+          "captcha is invalid or expired",
+          "unauthenticated"
+        );
+      }
     }
     const account = await db.account.findFirst({
       where: {
