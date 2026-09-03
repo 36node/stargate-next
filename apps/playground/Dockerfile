@@ -4,13 +4,18 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV __NEXT_PROCESSED_ENV=true
 ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
+ENV HOSTNAME="0.0.0.0"
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --chown=nextjs:nodejs .docker/playground ./
+COPY --chown=nextjs:nodejs .next/standalone ./
+COPY --chown=nextjs:nodejs .next/static ./apps/playground/.next/static
+COPY --chown=nextjs:nodejs public ./apps/playground/public
+
+RUN chown -R nextjs:nodejs /app
 
 USER nextjs
 

@@ -8,7 +8,9 @@ ENV PORT=9527
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nestjs
 
-COPY --chown=nestjs:nodejs .docker/stargate-next ./
+COPY --chown=nestjs:nodejs deploy/package.json ./package.json
+COPY --chown=nestjs:nodejs deploy/node_modules ./node_modules
+COPY --chown=nestjs:nodejs dist ./dist
 
 USER nestjs
 

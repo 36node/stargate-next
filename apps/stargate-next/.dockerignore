@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!deploy/
+!deploy/package.json
+!deploy/node_modules/
+!deploy/node_modules/**
+!dist/
+!dist/**

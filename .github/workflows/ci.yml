@@ -101,6 +101,9 @@ jobs:
       - name: Code check
         run: pnpm check
 
+      - name: Verify Docker COPY input lists
+        run: FINGERPRINT_VERIFY_COPY_INPUTS_ONLY=1 FINGERPRINT_TARGET=all bash scripts/docker-image-fingerprint.sh
+
   test-and-build:
     name: Test and build
     runs-on: arc-runners-mekong
@@ -211,15 +214,11 @@ jobs:
         env:
           NODE_ENV: production
           BUILD_STANDALONE: "true"
-      - name: Prepare DB production runtime
+      - name: Prepare Docker runtime artifacts
         if: github.actor != 'dependabot[bot]'
-        run: bash scripts/prepare-db-runtime.sh
-      - name: Prepare Playground production runtime
-        if: github.actor != 'dependabot[bot]'
-        run: bash scripts/prepare-playground-runtime.sh
-      - name: Prepare Stargate Next production runtime
-        if: github.actor != 'dependabot[bot]'
-        run: bash scripts/prepare-stargate-next-runtime.sh
+        run: |
+          bash scripts/prepare-docker-context.sh stargate-next pnpm
+          bash scripts/prepare-docker-context.sh playground pnpm
       - name: Set up Docker Buildx
         if: github.actor != 'dependabot[bot]'
         uses: docker/setup-buildx-action@v4
@@ -320,6 +319,19 @@ jobs:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
           DB_TAGS: ${{ steps.image-plan.outputs.db_tags }}
+      - name: Verify Alpine runtime artifacts
+        if: github.actor != 'dependabot[bot]'
+        run: |
+          set -euo pipefail
+          verify_image() {
+            local target="$1"
+            local image_ref="$2"
+            docker pull "$image_ref"
+            bash scripts/verify-docker-runtime.sh "$target" "$image_ref"
+          }
+          verify_image stargate-next "${{ steps.image-plan.outputs.stargate_next_fingerprint_tag }}"
+          verify_image playground "${{ steps.image-plan.outputs.playground_fingerprint_tag }}"
+          verify_image db "${{ steps.image-plan.outputs.db_fingerprint_tag }}"
       - name: Build summary
         if: always() && github.actor != 'dependabot[bot]'
         run: |

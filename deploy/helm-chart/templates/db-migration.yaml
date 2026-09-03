@@ -33,7 +33,7 @@ spec:
         - name: migrate
           image: {{ include "stargate-next.image" (dict "image" .Values.db.migration.image "global" .Values.global) }}
           imagePullPolicy: {{ .Values.db.migration.image.pullPolicy | default .Values.global.imagePullPolicy }}
-          command: ["sh", "-c", "prisma migrate deploy"]
+          command: ["npx", "prisma", "migrate", "deploy"]
           envFrom:
             - secretRef:
                 name: db-migration

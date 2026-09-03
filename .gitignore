@@ -293,6 +293,9 @@ packages/db/.probe/
 
 /.docker
 
+apps/*/deploy/
+packages/db/deploy/
+
 /data
 
 .mindfs
