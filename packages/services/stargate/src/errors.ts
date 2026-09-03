@@ -1,4 +1,4 @@
-import type { StargateErrorCategory, StargateErrorCode } from "./contracts";
+import type { StargateErrorCategory, StargateErrorCode } from "./contracts.js";
 
 export class StargateServiceError extends Error {
   readonly code: StargateErrorCode;

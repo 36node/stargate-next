@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { login, request, uniqueUsername } from "./support/black-box";
+import { login, request, uniqueUsername } from "./support/black-box.js";
 
 type Account = {
   active: boolean;

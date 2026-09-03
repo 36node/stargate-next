@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
 
-import { AccountModule } from "./account/account.module";
-import { HealthController } from "./platform/health.controller";
-import { SessionModule } from "./session/session.module";
-import { TenantModule } from "./tenant/tenant.module";
+import { AccountModule } from "./account/account.module.js";
+import { HealthController } from "./platform/health.controller.js";
+import { SessionModule } from "./session/session.module.js";
+import { TenantModule } from "./tenant/tenant.module.js";
 
 @Module({
   controllers: [HealthController],

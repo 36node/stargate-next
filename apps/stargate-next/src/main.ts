@@ -4,10 +4,10 @@ import { ValidationPipe } from "@nestjs/common";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 
-import { AppModule } from "./app.module";
-import { StargateServiceExceptionFilter } from "./auth/stargate-service-exception.filter";
-import { createAccessLogMiddleware } from "./platform/access-log.middleware";
-import { JsonLogger } from "./platform/json-logger";
+import { AppModule } from "./app.module.js";
+import { StargateServiceExceptionFilter } from "./auth/stargate-service-exception.filter.js";
+import { createAccessLogMiddleware } from "./platform/access-log.middleware.js";
+import { JsonLogger } from "./platform/json-logger.js";
 
 async function bootstrap() {
   const logger = new JsonLogger({

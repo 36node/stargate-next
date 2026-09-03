@@ -15,6 +15,7 @@ verify_node_runtime() {
   local runtime_module="$2"
 
   docker run --rm --entrypoint node "$IMAGE" \
+    --import tsx \
     --input-type=module \
     --eval "
       import { access } from 'node:fs/promises';
@@ -38,7 +39,7 @@ verify_db_runtime() {
 
 case "$TARGET" in
   stargate-next)
-    verify_node_runtime './dist/src/main.js' '@repo/stargate-service'
+    verify_node_runtime './dist/main.js' '@repo/stargate-service'
     ;;
   playground)
     docker run --rm --entrypoint node "$IMAGE" \

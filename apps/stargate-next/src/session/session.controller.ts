@@ -17,8 +17,8 @@ import type {
 } from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
-import { STARGATE_SERVICE } from "../auth/stargate-service.module";
-import { requestContext, tenantHeader } from "../platform/request-context";
+import { STARGATE_SERVICE } from "../auth/stargate-service.module.js";
+import { requestContext, tenantHeader } from "../platform/request-context.js";
 
 function requiredString(
   value: unknown,

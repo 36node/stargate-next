@@ -1,8 +1,8 @@
 /** Access Token 的集中签发与严格验签实现。 */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import type { AccessTokenClaims } from "./contracts";
-import { serviceError } from "./errors";
+import type { AccessTokenClaims } from "./contracts.js";
+import { serviceError } from "./errors.js";
 
 export const ACCESS_TOKEN_INVALID_MESSAGE = "access token is invalid";
 

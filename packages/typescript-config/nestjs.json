@@ -4,13 +4,10 @@
   "extends": "./base.json",
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
     "declaration": true,
     "declarationMap": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "module": "CommonJS",
-    "moduleResolution": "Node10",
     "noEmit": false,
     "removeComments": true,
     "sourceMap": true,

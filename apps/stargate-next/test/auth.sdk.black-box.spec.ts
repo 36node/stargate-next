@@ -3,7 +3,7 @@
 import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
-import { env, uniqueUsername } from "./support/black-box";
+import { env, uniqueUsername } from "./support/black-box.js";
 
 const endpoint = env("STARGATE_ENDPOINT");
 const apiKey = env("STARGATE_API_KEY");

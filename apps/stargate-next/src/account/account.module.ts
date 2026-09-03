@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 
-import { StargateServiceModule } from "../auth/stargate-service.module";
-import { AccountController } from "./account.controller";
+import { StargateServiceModule } from "../auth/stargate-service.module.js";
+import { AccountController } from "./account.controller.js";
 
 @Module({
   controllers: [AccountController],

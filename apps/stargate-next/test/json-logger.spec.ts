@@ -3,8 +3,8 @@ import { EventEmitter } from "node:events";
 import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 
-import { createAccessLogMiddleware } from "../src/platform/access-log.middleware";
-import { JsonLogger, resolveLogLevel } from "../src/platform/json-logger";
+import { createAccessLogMiddleware } from "../src/platform/access-log.middleware.js";
+import { JsonLogger, resolveLogLevel } from "../src/platform/json-logger.js";
 
 function records(lines: string[]): Record<string, unknown>[] {
   return lines.map((line) => JSON.parse(line) as Record<string, unknown>);

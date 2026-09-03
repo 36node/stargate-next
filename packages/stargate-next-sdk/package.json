@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "typescript": "^5.9.3"
+    "typescript": "catalog:toolchain"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"

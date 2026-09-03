@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 
-import type { JsonLogger } from "./json-logger";
+import type { JsonLogger } from "./json-logger.js";
 
 function clientIp(request: Request): string | undefined {
   const forwardedFor = request.headers["x-forwarded-for"];

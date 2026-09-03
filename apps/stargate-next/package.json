@@ -3,23 +3,23 @@
   "version": "1.2.0",
   "description": "Stargate Next API service (NestJS).",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "pnpm --filter @repo/stargate-service... --if-present build && nest build",
-    "build:ci": "pnpm --filter @repo/stargate-service... --if-present build:ci && nest build",
-    "predev": "pnpm --filter @repo/stargate-service build",
-    "dev": "nest start --watch",
+    "build": "nest build",
+    "build:ci": "nest build",
+    "dev": "NODE_OPTIONS=--import=tsx nest start --watch",
     "cleanup:idempotency": "pnpm --filter @repo/stargate-service cleanup:idempotency",
     "seed": "pnpm run seed:default-tenant && pnpm run seed:legacy-fixture",
     "seed:default-tenant": "pnpm --filter @repo/stargate-service seed:default-tenant",
     "seed:legacy-fixture": "pnpm --filter @repo/stargate-service seed:legacy-fixture",
-    "start": "node dist/src/main.js",
+    "start": "node --import tsx dist/main.js",
     "test": "vitest run --passWithNoTests --exclude 'test/**/*.black-box.spec.ts'",
     "test:api": "vitest run api.black-box.spec.ts",
     "test:sdk": "vitest run sdk.black-box.spec.ts",
     "test:load": "k6 run load-test/scenarios/tenant-auth.js",
     "test:load:smoke": "k6 run -e K6_PROFILE=smoke load-test/scenarios/tenant-auth.js",
     "test:load:ci": "k6 run -e K6_PROFILE=ci load-test/scenarios/tenant-auth.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
@@ -31,7 +31,8 @@
     "dotenv": "^16.6.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "svg-captcha": "^1.4.0"
+    "svg-captcha": "^1.4.0",
+    "tsx": "catalog:toolchain"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.7",
@@ -43,8 +44,7 @@
     "@types/express": "^5.0.3",
     "@types/k6": "^2.0.1",
     "@types/node": "^24.10.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
+    "typescript": "catalog:toolchain",
     "vitest": "^4.1.9"
   }
 }

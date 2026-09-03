@@ -2,12 +2,14 @@
  * 把旧版 MD5 账号 fixture 幂等写入内置 default Tenant。
  */
 
+import "dotenv/config";
+
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { db } from "@repo/db";
 
-import { seedDefaultTenant } from "./seed-default-tenant";
+import { seedDefaultTenant } from "./seed-default-tenant.js";
 
 type LegacyFixture = {
   id: string;
