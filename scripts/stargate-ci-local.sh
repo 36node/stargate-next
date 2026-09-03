@@ -9,6 +9,7 @@
 #   bash scripts/stargate-ci-local.sh --help
 #
 # Prerequisites:
+#   - Node.js 24
 #   - Docker with Buildx available
 #   - PostgreSQL and Redis for integration or black-box tests (see root .env)
 #   - Run `pnpm db:migrate` before service integration tests
@@ -220,6 +221,12 @@ main() {
   require_command rg
   require_command docker
   docker buildx version >/dev/null 2>&1 || fail 'Docker Buildx 不可用'
+
+  node_major="$(node --version)"
+  node_major="${node_major#v}"
+  node_major="${node_major%%.*}"
+  [[ "$node_major" == '24' ]] || fail "需要 Node.js 24，当前为 $(node --version)"
+
   cd "$REPO_ROOT"
 
   assert_legacy_outside_workspace

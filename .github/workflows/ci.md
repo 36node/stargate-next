@@ -19,6 +19,8 @@ CI 工作流会先验证 workspace 格式与边界，再运行测试与构建；
 
 `check` 与 `test-and-build` 并行运行；格式或 workspace 边界检查失败时，`deploy` 不会执行。
 
+CI runner（`arc-runners-mekong`）需预装 Node.js 24 与 pnpm（由 `packageManager` 字段固定版本）。
+
 ## legacy `apps/stargate`
 
 `apps/stargate` 是独立旧 Auth 参考服务，**不在 pnpm workspace 内**（见 `pnpm-workspace.yaml` 的 `!apps/stargate`）。CI 的 `check` Job 会校验其未出现在 workspace 包列表与根 `pnpm-lock.yaml` 中。本地启动 legacy 服务使用 `pnpm dev:stargate`。

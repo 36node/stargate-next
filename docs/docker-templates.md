@@ -47,7 +47,7 @@ bash scripts/prepare-docker-context.sh <stargate-next|playground> pnpm
 Nest 与 Next 应用统一使用：
 
 ```text
-harbor.36node.com/common/node:22-alpine3.23
+harbor.36node.com/common/node:24-alpine3.23
 ```
 
 DB toolkit 使用已登记变体 `prisma-tools`。
