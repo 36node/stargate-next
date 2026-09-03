@@ -24,9 +24,9 @@
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@repo/vitest-config": "workspace:*",
-    "@types/node": "^24.10.1",
+    "@types/node": "catalog:toolchain",
     "tsx": "catalog:toolchain",
     "typescript": "catalog:toolchain",
-    "vitest": "^4.1.9"
+    "vitest": "catalog:toolchain"
   }
 }
