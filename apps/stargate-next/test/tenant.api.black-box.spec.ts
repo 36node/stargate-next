@@ -168,6 +168,104 @@ describe("Given the multi-tenant HTTP API", () => {
     });
   });
 
+  it("manages Tenant captcha settings across HTTP boundaries", async () => {
+    const suffix = `${Date.now().toString(36)}s`;
+    const tenantId = `bb-${suffix}`;
+    const username = `captchasettings${suffix}`;
+    const created = await request("/v1/tenants", "POST", {
+      adminKey: true,
+      body: {
+        id: tenantId,
+        name: "Captcha Settings",
+        settings: { loginCaptchaRequired: false },
+      },
+    });
+    expect(created).toMatchObject({
+      status: 201,
+      body: {
+        id: tenantId,
+        settings: { loginCaptchaRequired: false },
+      },
+    });
+    expect(
+      await request(`/v1/tenants/${tenantId}`, "GET", { adminKey: true })
+    ).toMatchObject({
+      status: 200,
+      body: { settings: { loginCaptchaRequired: false } },
+    });
+    const listed = await request(
+      `/v1/tenants?page[offset]=0&page[limit]=100&filter[name]=${encodeURIComponent("Captcha Settings")}`,
+      "GET",
+      { adminKey: true }
+    );
+    expect(listed.status).toBe(200);
+    expect(
+      (
+        listed.body as {
+          data: Array<{
+            attributes: { settings: { loginCaptchaRequired?: boolean } };
+            id: string;
+          }>;
+        }
+      ).data.find(({ id }) => id === tenantId)?.attributes.settings
+    ).toEqual({ loginCaptchaRequired: false });
+
+    expect(
+      await request("/v1/accounts", "POST", {
+        adminKey: true,
+        body: { password: "captcha-settings-password", username },
+        tenantId,
+      })
+    ).toMatchObject({ status: 201, body: { tenantId } });
+    expect(
+      await request("/v1/auth/login", "POST", {
+        body: { login: username, password: "captcha-settings-password" },
+        tenantId,
+      })
+    ).toMatchObject({ status: 200, body: { tenantId } });
+
+    const captcha = await request("/v1/captchas", "POST", { tenantId });
+    expect(captcha.status).toBe(201);
+    expect(
+      await request("/v1/captchas/verify", "POST", {
+        body: {
+          code: env("CAPTCHA_TEST_CODE"),
+          id: (captcha.body as { id: string }).id,
+        },
+        tenantId,
+      })
+    ).toMatchObject({ status: 200, body: { verified: true } });
+
+    expect(
+      await request(`/v1/tenants/${tenantId}`, "PATCH", {
+        adminKey: true,
+        body: { settings: {} },
+      })
+    ).toMatchObject({ status: 200, body: { settings: {} } });
+    expect(
+      await request("/v1/auth/login", "POST", {
+        body: { login: username, password: "captcha-settings-password" },
+        tenantId,
+      })
+    ).toMatchObject({
+      status: 400,
+      body: { code: "CAPTCHA_CODE_INVALID" },
+    });
+    expect(
+      await request("/v1/auth/login", "POST", {
+        body: {
+          captchaCode: env("CAPTCHA_TEST_CODE"),
+          login: username,
+          password: "captcha-settings-password",
+        },
+        tenantId,
+      })
+    ).toMatchObject({
+      status: 400,
+      body: { code: "CAPTCHA_ID_INVALID" },
+    });
+  });
+
   it("creates one-time Tenant keys without exposing stored credentials", async () => {
     const suffix = `${Date.now().toString(36)}k`;
     const tenantId = `bb-${suffix}`;
@@ -338,6 +436,30 @@ describe("Given the multi-tenant HTTP API", () => {
         path: "/v1/tenants",
       },
       {
+        body: { settings: null },
+        code: "BODY_INVALID",
+        method: "POST",
+        path: "/v1/tenants",
+      },
+      {
+        body: { settings: [] },
+        code: "BODY_INVALID",
+        method: "POST",
+        path: "/v1/tenants",
+      },
+      {
+        body: { settings: { loginCaptchaRequired: "false" } },
+        code: "BODY_INVALID",
+        method: "POST",
+        path: "/v1/tenants",
+      },
+      {
+        body: { settings: { unknown: true } },
+        code: "BODY_INVALID",
+        method: "POST",
+        path: "/v1/tenants",
+      },
+      {
         body: { status: true },
         code: "PATCH_INVALID",
         method: "PATCH",
@@ -357,6 +479,30 @@ describe("Given the multi-tenant HTTP API", () => {
       },
       {
         body: { id: "x" },
+        code: "PATCH_INVALID",
+        method: "PATCH",
+        path: `/v1/tenants/${tenantId}`,
+      },
+      {
+        body: { settings: null },
+        code: "PATCH_INVALID",
+        method: "PATCH",
+        path: `/v1/tenants/${tenantId}`,
+      },
+      {
+        body: { settings: [] },
+        code: "PATCH_INVALID",
+        method: "PATCH",
+        path: `/v1/tenants/${tenantId}`,
+      },
+      {
+        body: { settings: { loginCaptchaRequired: "false" } },
+        code: "PATCH_INVALID",
+        method: "PATCH",
+        path: `/v1/tenants/${tenantId}`,
+      },
+      {
+        body: { settings: { unknown: true } },
         code: "PATCH_INVALID",
         method: "PATCH",
         path: `/v1/tenants/${tenantId}`,
@@ -393,6 +539,9 @@ describe("Given the multi-tenant HTTP API", () => {
         adminKey: true,
       })
     ).toMatchObject({ status: 400, body: { code: "PAGE_INVALID" } });
+    expect(
+      await request(`/v1/tenants/${tenantId}`, "GET", { adminKey: true })
+    ).toMatchObject({ status: 200, body: { settings: {} } });
   });
 
   it("handles omitted, empty, malformed, and active Tenant headers", async () => {

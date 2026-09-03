@@ -14,6 +14,46 @@ function env(name: string): string {
 }
 
 describe("Given the multi-tenant generated SDK", () => {
+  it("uses typed Tenant settings to make login Captcha conditional", async () => {
+    const endpoint = env("STARGATE_ENDPOINT");
+    const suffix = `${Date.now().toString(36)}s`;
+    const tenantId = `sdk-${suffix}`;
+    const username = `sdkcaptcha${suffix}`;
+    const admin = new StargateNextClient(endpoint, {
+      apiKey: env("STARGATE_ADMIN_API_KEY"),
+      tenantId,
+    });
+    const created = await admin.createTenant({
+      id: tenantId,
+      name: "SDK Captcha Settings",
+      settings: { loginCaptchaRequired: false },
+    });
+    expect(created.settings).toEqual({ loginCaptchaRequired: false });
+    await expect(admin.getTenant(tenantId)).resolves.toMatchObject({
+      settings: { loginCaptchaRequired: false },
+    });
+    const listed = await admin.listTenants(0, 100, "SDK Captcha Settings");
+    expect(
+      listed.data.find(({ id }) => id === tenantId)?.attributes.settings
+    ).toEqual({ loginCaptchaRequired: false });
+
+    const account = await admin.createAccount({
+      password: "sdk-captcha-password",
+      username,
+    });
+    expect(account.tenantId).toBe(tenantId);
+    const publicClient = new StargateNextClient(endpoint, { tenantId });
+    await expect(
+      publicClient.login(username, "sdk-captcha-password")
+    ).resolves.toMatchObject({ accountId: account.id, tenantId });
+
+    const defaulted = await admin.patchTenant(tenantId, { settings: {} });
+    expect(defaulted.settings).toEqual({});
+    await expect(
+      publicClient.login(username, "sdk-captcha-password")
+    ).rejects.toMatchObject({ code: "CAPTCHA_CODE_INVALID", status: 400 });
+  });
+
   it("manages a Tenant and a scoped key without leaking plaintext", async () => {
     const endpoint = env("STARGATE_ENDPOINT");
     const suffix = Date.now().toString(36);

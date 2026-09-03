@@ -1949,14 +1949,6 @@ export class StargateService implements StargateServiceContract {
         data: { settings },
         where: { id: tenantId },
       });
-      await this.writeAudit(transaction, {
-        actorType: "admin",
-        context,
-        eventType: "tenant.settings.updated",
-        metadata: { keys: Object.keys(settings).join(",") },
-        success: true,
-        tenantId,
-      });
     }
     await this.applyTenantStatus(transaction, current, input.status, context);
     return this.tenantRecord(transaction, tenantId);

@@ -222,8 +222,80 @@ describe("Tenant service integration", () => {
     ).toBe(1);
   });
 
-  it("uses tenant settings to disable login captcha", async () => {
-    const tenant = await createTenant("captcha-disabled");
+  it("applies create-time captcha settings without affecting other Tenants", async () => {
+    const disabledTenantId = `${prefix}-captcha-disabled`;
+    tenantIds.add(disabledTenantId);
+    const disabledTenant = await service.createTenant(
+      adminScope,
+      {
+        id: disabledTenantId,
+        settings: { loginCaptchaRequired: false },
+      },
+      context("create-captcha-disabled")
+    );
+    expect(disabledTenant.settings).toEqual({ loginCaptchaRequired: false });
+    await expect(
+      service.getTenant(adminScope, disabledTenant.id)
+    ).resolves.toMatchObject({
+      settings: { loginCaptchaRequired: false },
+    });
+    const listed = await service.listTenants(adminScope, 100, 0, "/v1/tenants");
+    expect(
+      listed.data.find(({ id }) => id === disabledTenant.id)?.attributes
+        .settings
+    ).toEqual({ loginCaptchaRequired: false });
+
+    const requiredTenant = await createTenant("captcha-required");
+    const [disabledScope, requiredScope] = await Promise.all([
+      service.resolveApiCredential(config.adminApiKey, disabledTenant.id),
+      service.resolveApiCredential(config.adminApiKey, requiredTenant.id),
+    ]);
+    const disabledAccount = await service.createAccount(
+      disabledScope,
+      {
+        password: "captcha-disabled-password",
+        username: `${prefix}captcha_disabled`,
+      },
+      context("captcha-disabled-account")
+    );
+    const requiredAccount = await service.createAccount(
+      requiredScope,
+      {
+        password: "captcha-required-password",
+        username: `${prefix}captcha_required`,
+      },
+      context("captcha-required-account")
+    );
+    accountIds.add(disabledAccount.id);
+    accountIds.add(requiredAccount.id);
+
+    await expect(
+      service.login(
+        disabledTenant.id,
+        {
+          login: disabledAccount.username,
+          password: "captcha-disabled-password",
+        },
+        context("captcha-disabled-login")
+      )
+    ).resolves.toMatchObject({
+      accountId: disabledAccount.id,
+      tenantId: disabledTenant.id,
+    });
+    await expect(
+      service.login(
+        requiredTenant.id,
+        {
+          login: requiredAccount.username,
+          password: "captcha-required-password",
+        },
+        context("captcha-required-login")
+      )
+    ).rejects.toMatchObject({ code: "CAPTCHA_CODE_INVALID" });
+  });
+
+  it("replaces captcha settings and restores the secure default", async () => {
+    const tenant = await createTenant("captcha-replacement");
     const scope = await service.resolveApiCredential(
       config.adminApiKey,
       tenant.id
@@ -231,43 +303,138 @@ describe("Tenant service integration", () => {
     const account = await service.createAccount(
       scope,
       {
-        password: "captcha-disabled-password",
-        username: `${prefix}captcha_disabled`,
+        password: "captcha-replacement-password",
+        username: `${prefix}captcha_replacement`,
       },
-      context("captcha-disabled-account")
+      context("captcha-replacement-account")
     );
     accountIds.add(account.id);
 
-    await expect(
-      service.login(
-        tenant.id,
-        { login: account.username, password: "captcha-disabled-password" },
-        context("captcha-disabled-login-before")
-      )
-    ).rejects.toMatchObject({ code: "CAPTCHA_CODE_INVALID" });
-
-    const updated = await service.patchTenant(
+    const disabled = await service.patchTenant(
       adminScope,
       tenant.id,
       { settings: { loginCaptchaRequired: false } },
-      context("captcha-disabled-settings")
+      context("captcha-replacement-disabled")
     );
-    expect(updated.settings).toEqual({ loginCaptchaRequired: false });
+    expect(disabled.settings).toEqual({ loginCaptchaRequired: false });
     await expect(
       service.login(
         tenant.id,
-        { login: account.username, password: "captcha-disabled-password" },
-        context("captcha-disabled-login-after")
+        { login: account.username, password: "captcha-replacement-password" },
+        context("captcha-replacement-login-disabled")
       )
-    ).resolves.toMatchObject({ accountId: account.id, tenantId: tenant.id });
+    ).resolves.toMatchObject({ accountId: account.id });
+
+    const defaulted = await service.patchTenant(
+      adminScope,
+      tenant.id,
+      { settings: {} },
+      context("captcha-replacement-defaulted")
+    );
+    expect(defaulted.settings).toEqual({});
     await expect(
-      service.patchTenant(
-        adminScope,
+      service.login(
         tenant.id,
-        { settings: { loginCaptchaRequired: "false" as never } },
-        context("captcha-disabled-invalid-settings")
+        {
+          captchaCode: "ABCD",
+          login: account.username,
+          password: "captcha-replacement-password",
+        },
+        context("captcha-replacement-missing-id")
       )
-    ).rejects.toMatchObject({ code: "PATCH_INVALID" });
+    ).rejects.toMatchObject({ code: "CAPTCHA_ID_INVALID" });
+
+    const enabled = await service.patchTenant(
+      adminScope,
+      tenant.id,
+      { settings: { loginCaptchaRequired: true } },
+      context("captcha-replacement-enabled")
+    );
+    expect(enabled.settings).toEqual({ loginCaptchaRequired: true });
+    await expect(
+      service.login(
+        tenant.id,
+        { login: account.username, password: "captcha-replacement-password" },
+        context("captcha-replacement-login-enabled")
+      )
+    ).rejects.toMatchObject({ code: "CAPTCHA_CODE_INVALID" });
+    await expect(service.getTenant(adminScope, tenant.id)).resolves.toEqual(
+      enabled
+    );
+  });
+
+  it("rejects invalid Tenant settings without changing stored settings", async () => {
+    const tenantId = `${prefix}-invalid-settings`;
+    tenantIds.add(tenantId);
+    const invalidSettings: unknown[] = [
+      null,
+      [],
+      false,
+      "false",
+      { unknown: true },
+      { loginCaptchaRequired: "false" },
+    ];
+
+    for (const [index, settings] of invalidSettings.entries()) {
+      const invalidTenantId = `${prefix}-invalid-create-${index}`;
+      tenantIds.add(invalidTenantId);
+      await expect(
+        service.createTenant(
+          adminScope,
+          { id: invalidTenantId, settings: settings as never },
+          context(`invalid-create-settings-${index}`)
+        )
+      ).rejects.toMatchObject({ code: "BODY_INVALID" });
+    }
+
+    await service.createTenant(
+      adminScope,
+      { id: tenantId, settings: { loginCaptchaRequired: false } },
+      context("create-invalid-settings-target")
+    );
+    for (const [index, settings] of invalidSettings.entries()) {
+      await expect(
+        service.patchTenant(
+          adminScope,
+          tenantId,
+          { settings: settings as never },
+          context(`invalid-patch-settings-${index}`)
+        )
+      ).rejects.toMatchObject({ code: "PATCH_INVALID" });
+    }
+    await expect(
+      service.getTenant(adminScope, tenantId)
+    ).resolves.toMatchObject({ settings: { loginCaptchaRequired: false } });
+  });
+
+  it("does not audit settings updates while preserving status audits", async () => {
+    const tenant = await createTenant("settings-no-audit");
+    const settingsContext = context("settings-no-audit");
+    await service.patchTenant(
+      adminScope,
+      tenant.id,
+      { settings: { loginCaptchaRequired: false } },
+      settingsContext
+    );
+    await expect(
+      db.authAuditEvent.findMany({
+        where: { requestId: settingsContext.requestId },
+      })
+    ).resolves.toEqual([]);
+
+    const statusContext = context("settings-with-status-audit");
+    await service.patchTenant(
+      adminScope,
+      tenant.id,
+      { settings: {}, status: "disabled" },
+      statusContext
+    );
+    await expect(
+      db.authAuditEvent.findMany({
+        select: { eventType: true },
+        where: { requestId: statusContext.requestId },
+      })
+    ).resolves.toEqual([{ eventType: "tenant.disabled" }]);
   });
 
   it("uses stable errors for invalid ids, the default reservation, and missing paths", async () => {
