@@ -15,7 +15,7 @@
 ### Nest (`stargate-next`)
 
 - GitHub Actions runner 先安装依赖，再构建 workspace 包与 Nest `dist`。
-- runner 使用 `pnpm deploy --legacy --prod --os=linux --cpu=x64 --libc=musl` 生成 app-local `deploy`；Dockerfile 不安装依赖、不执行构建。
+- runner 使用 `pnpm deploy --legacy --prod --os=linux --cpu=x64 --libc=musl` 生成 app-local `deploy`；pnpm 11 的孤立 production install 跳过生命周期脚本，所需 Prisma Client 已在 deploy 前生成。Dockerfile 不安装依赖、不执行构建。
 - 孤立 production install 使用 `--config.ignore-scripts=true`，避免 `@repo/db` postinstall 因缺少 Prisma CLI 失败。
 - Dockerfile 只复制 `deploy/package.json`、`deploy/node_modules` 和 `dist`。
 - 生产镜像以 UID 1001 的 `nestjs` 用户运行，入口为 `node --import tsx dist/main.js`；`tsx` 由 production deploy 提供。
