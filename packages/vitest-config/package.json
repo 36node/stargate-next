@@ -1,0 +1,22 @@
+{
+  "name": "@repo/vitest-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./node": {
+      "types": "./node.d.mts",
+      "default": "./node.mjs"
+    },
+    "./jsdom": {
+      "types": "./jsdom.d.mts",
+      "default": "./jsdom.mjs"
+    }
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.9"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}

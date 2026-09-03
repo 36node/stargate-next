@@ -6,7 +6,12 @@ OUTPUT_DIR="${1:-$ROOT_DIR/.docker/stargate-next}"
 
 cd "$ROOT_DIR"
 
-test -f apps/stargate-next/dist/src/main.js
+if [ ! -f apps/stargate-next/dist/src/main.js ]; then
+  echo "error: expected nest build output at apps/stargate-next/dist/src/main.js" >&2
+  ls -la apps/stargate-next/dist 2>/dev/null || true
+  ls -la apps/stargate-next/dist/src 2>/dev/null || true
+  exit 1
+fi
 test -d packages/services/stargate/dist
 test -d packages/db/dist
 test -d packages/redis/dist

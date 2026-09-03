@@ -71,6 +71,36 @@ jobs:
           content: ${{ steps.main-content.outputs.content }}
           uuid: main-${{ github.sha }}
 
+  check:
+    name: Check workspace format and boundaries
+    runs-on: arc-runners-mekong
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify legacy apps/stargate is outside workspace
+        run: |
+          set -euo pipefail
+          if pnpm list -r --depth -1 2>/dev/null | rg -q '/apps/stargate$'; then
+            echo "::error::apps/stargate must not be part of the pnpm workspace"
+            exit 1
+          fi
+          if rg -n '^  apps/stargate:$' pnpm-lock.yaml; then
+            echo "::error::pnpm-lock.yaml must not include apps/stargate"
+            exit 1
+          fi
+
+      - name: Code check
+        run: pnpm check
+
   test-and-build:
     name: Test and build
     runs-on: arc-runners-mekong
@@ -114,8 +144,6 @@ jobs:
         run: pnpm --filter @repo/db verify:backfill
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stargate-next-test
-      - name: Code check
-        run: pnpm check
       - name: Verify Stargate service boundaries
         run: |
           ! rg -n '@repo/(db|redis)' apps/stargate-next --glob '*.ts'
@@ -343,6 +371,7 @@ jobs:
 
   build-helm-chart:
     name: Build Helm chart
+    needs: [check]
     runs-on: arc-runners-mekong
     if: >-
       ${{
@@ -442,7 +471,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [test-and-build, build-helm-chart]
+    needs: [check, test-and-build, build-helm-chart]
     if: >-
       ${{
         always() &&
@@ -454,6 +483,7 @@ jobs:
             (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           )
         ) &&
+        needs.check.result == 'success' &&
         needs['test-and-build'].result == 'success' &&
         needs['build-helm-chart'].result == 'success'
       }}
