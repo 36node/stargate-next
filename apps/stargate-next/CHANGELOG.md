@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v1.1.0...stargate-next-v1.2.0) (2026-09-03)
+
+
+### Features
+
+* loginCaptchaRequired ([#58](https://github.com/36node-mekong/stargate-next/issues/58)) ([3ab2b9c](https://github.com/36node-mekong/stargate-next/commit/3ab2b9c4509d60a31dda7f290a4dcadafa752f9c))
+
 ## [1.1.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v1.0.1...stargate-next-v1.1.0) (2026-08-08)
 
 

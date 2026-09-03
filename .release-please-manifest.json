@@ -1,5 +1,5 @@
 {
-  "apps/stargate-next": "1.1.0",
+  "apps/stargate-next": "1.2.0",
   "apps/playground": "1.2.0",
-  "packages/db": "1.1.0"
+  "packages/db": "1.2.0"
 }
