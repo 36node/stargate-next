@@ -53,6 +53,7 @@ import type {
   TenantInput,
   TenantPatchInput,
   TenantScope,
+  TenantSettings,
   TenantStatus,
 } from "./contracts";
 import { serviceError } from "./errors";
@@ -308,12 +309,56 @@ function publicSession(session: {
   };
 }
 
+function readTenantSettings(value: unknown): TenantSettings {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const settings = value as Record<string, unknown>;
+  return typeof settings.loginCaptchaRequired === "boolean"
+    ? { loginCaptchaRequired: settings.loginCaptchaRequired }
+    : {};
+}
+
+function normalizeTenantSettings(
+  value: unknown,
+  code: StargateErrorCode
+): TenantSettings {
+  if (value === undefined) {
+    return {};
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw serviceError(
+      code,
+      "settings must be a JSON object",
+      "invalid_argument"
+    );
+  }
+  const settings = value as Record<string, unknown>;
+  if (
+    Object.keys(settings).some((key) => key !== "loginCaptchaRequired") ||
+    (settings.loginCaptchaRequired !== undefined &&
+      typeof settings.loginCaptchaRequired !== "boolean")
+  ) {
+    throw serviceError(
+      code,
+      "settings.loginCaptchaRequired must be a boolean",
+      "invalid_argument"
+    );
+  }
+  return readTenantSettings(settings);
+}
+
+function tenantSettingsRequiresCaptcha(value: unknown): boolean {
+  return readTenantSettings(value).loginCaptchaRequired !== false;
+}
+
 function publicTenant(tenant: Tenant): PublicTenant {
   return {
     createdAt: toIso(tenant.createdAt),
     id: tenant.id,
     name: tenant.name,
     status: tenant.status as TenantStatus,
+    settings: readTenantSettings(tenant.settings),
     updatedAt: toIso(tenant.updatedAt),
   };
 }
@@ -735,7 +780,7 @@ export class StargateService implements StargateServiceContract {
   private async resolvePublicTenant(
     raw: string | undefined,
     failureCode: "LOGIN_INVALID" | "REFRESH_INVALID" | "TENANT_INVALID"
-  ): Promise<string> {
+  ): Promise<Tenant> {
     let tenantId: string;
     try {
       tenantId = this.parseTenantHeader(raw) ?? DEFAULT_TENANT_ID;
@@ -746,17 +791,18 @@ export class StargateService implements StargateServiceContract {
     if (!tenant || tenant.status !== "active") {
       throw serviceError(failureCode, "tenant is invalid", "unauthenticated");
     }
-    return tenantId;
+    return tenant;
   }
 
   async createCaptcha(
     tenantHeader: string | undefined,
     context: RequestContext
   ): Promise<Captcha> {
-    const tenantId = await this.resolvePublicTenant(
+    const tenant = await this.resolvePublicTenant(
       tenantHeader,
       "TENANT_INVALID"
     );
+    const tenantId = tenant.id;
     const client = context.ip ?? "unknown";
     const rateLimitKey = this.redisKey(
       CAPTCHA_RATE_LIMIT_PREFIX,
@@ -803,18 +849,21 @@ export class StargateService implements StargateServiceContract {
     id: string,
     code: string
   ): Promise<boolean> {
-    const tenantId = await this.resolvePublicTenant(
+    const tenant = await this.resolvePublicTenant(
       tenantHeader,
       "TENANT_INVALID"
     );
-    return this.verifyCaptchaForTenant(tenantId, id, code);
+    return this.verifyCaptchaForTenant(tenant.id, id, code);
   }
 
   private async verifyCaptchaForTenant(
     tenantId: string,
-    id: string,
-    code: string
+    id: string | undefined,
+    code: string | undefined
   ): Promise<boolean> {
+    if (!(id && code)) {
+      return false;
+    }
     const result = await withRedisTimeout(
       getRedisClient().eval(
         `local raw = redis.call("GET", KEYS[1])
@@ -1200,10 +1249,11 @@ export class StargateService implements StargateServiceContract {
     input: LoginInput,
     context: RequestContext
   ): Promise<AuthTokens> {
-    const tenantId = await this.resolvePublicTenant(
+    const tenant = await this.resolvePublicTenant(
       tenantHeader,
       "LOGIN_INVALID"
     );
+    const tenantId = tenant.id;
     const rawLogin = requiredString(
       input.login,
       "LOGIN_IDENTIFIER_INVALID",
@@ -1226,19 +1276,35 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    if (
-      !(await this.verifyCaptchaForTenant(
-        tenantId,
-        input.captchaId,
-        input.captchaCode
-      ))
-    ) {
-      await this.loginFailure(failureKey, tenantId, context);
-      throw serviceError(
-        "CAPTCHA_INVALID",
-        "captcha is invalid or expired",
-        "unauthenticated"
-      );
+    if (tenantSettingsRequiresCaptcha(tenant.settings)) {
+      if (input.captchaCode === undefined) {
+        throw serviceError(
+          "CAPTCHA_CODE_INVALID",
+          "captcha code is required",
+          "invalid_argument"
+        );
+      }
+      if (input.captchaId === undefined) {
+        throw serviceError(
+          "CAPTCHA_ID_INVALID",
+          "captcha id is required",
+          "invalid_argument"
+        );
+      }
+      if (
+        !(await this.verifyCaptchaForTenant(
+          tenantId,
+          input.captchaId,
+          input.captchaCode
+        ))
+      ) {
+        await this.loginFailure(failureKey, tenantId, context);
+        throw serviceError(
+          "CAPTCHA_INVALID",
+          "captcha is invalid or expired",
+          "unauthenticated"
+        );
+      }
     }
     const account = await db.account.findFirst({
       where: {
@@ -1355,10 +1421,11 @@ export class StargateService implements StargateServiceContract {
     refreshKey: string,
     context: RequestContext
   ): Promise<AuthTokens> {
-    const tenantId = await this.resolvePublicTenant(
+    const tenant = await this.resolvePublicTenant(
       tenantHeader,
       "REFRESH_INVALID"
     );
+    const tenantId = tenant.id;
     const candidates = [this.settings.primary, this.settings.secondary]
       .filter((key): key is { id: string; secret: string } => key !== undefined)
       .map((key) => ({
@@ -1715,11 +1782,12 @@ export class StargateService implements StargateServiceContract {
   private async createTenantAttempt(
     id: string,
     name: string | null,
+    settings: TenantSettings,
     context: RequestContext
   ): Promise<PublicTenant> {
     const tenant = await db.$transaction(async (transaction) => {
       const created = await transaction.tenant.create({
-        data: { id, name, status: "active" },
+        data: { id, name, settings, status: "active" },
       });
       await this.writeAudit(transaction, {
         actorType: "admin",
@@ -1739,10 +1807,11 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext
   ): Promise<PublicTenant> {
     const name = input.name?.trim() || null;
+    const settings = normalizeTenantSettings(input.settings, "BODY_INVALID");
     if (input.id !== undefined) {
       const id = this.assertTenantId(input.id);
       try {
-        return await this.createTenantAttempt(id, name, context);
+        return await this.createTenantAttempt(id, name, settings, context);
       } catch (error) {
         if (isPrismaCode(error, "P2002")) {
           throw serviceError(
@@ -1760,6 +1829,7 @@ export class StargateService implements StargateServiceContract {
         return await this.createTenantAttempt(
           this.generateTenantId(),
           name,
+          settings,
           context
         );
       } catch (error) {
@@ -1871,6 +1941,21 @@ export class StargateService implements StargateServiceContract {
       await transaction.tenant.update({
         data: { name: input.name?.trim() || null },
         where: { id: tenantId },
+      });
+    }
+    if (input.settings !== undefined) {
+      const settings = normalizeTenantSettings(input.settings, "PATCH_INVALID");
+      await transaction.tenant.update({
+        data: { settings },
+        where: { id: tenantId },
+      });
+      await this.writeAudit(transaction, {
+        actorType: "admin",
+        context,
+        eventType: "tenant.settings.updated",
+        metadata: { keys: Object.keys(settings).join(",") },
+        success: true,
+        tenantId,
       });
     }
     await this.applyTenantStatus(transaction, current, input.status, context);

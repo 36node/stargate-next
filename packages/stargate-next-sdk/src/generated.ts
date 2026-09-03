@@ -128,12 +128,17 @@ export class StargateNextClient {
   login(
     login: string,
     password: string,
-    captchaId: string,
-    captchaCode: string,
+    captchaId?: string,
+    captchaCode?: string,
     tenantId?: string
   ) {
     return this.request<AuthTokens>("/v1/auth/login", "POST", {
-      body: { captchaCode, captchaId, login, password },
+      body: {
+        ...(captchaCode === undefined ? {} : { captchaCode }),
+        ...(captchaId === undefined ? {} : { captchaId }),
+        login,
+        password,
+      },
       tenantId,
       tenantScoped: true,
     });

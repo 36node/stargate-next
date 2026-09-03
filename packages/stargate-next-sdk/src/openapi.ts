@@ -314,9 +314,9 @@ export interface components {
         LoginInput: {
             login: string;
             password: string;
-            captchaId: string;
+            captchaId?: string;
             /** @description Four characters from the case-insensitive captcha alphabet. */
-            captchaCode: string;
+            captchaCode?: string;
         };
         RefreshInput: {
             refreshKey: string;
@@ -413,6 +413,9 @@ export interface components {
             name: string | null;
             /** @enum {string} */
             status: "active" | "disabled";
+            settings: {
+                loginCaptchaRequired?: boolean;
+            };
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -421,11 +424,17 @@ export interface components {
         CreateTenantInput: {
             id?: string;
             name?: string | null;
+            settings?: {
+                loginCaptchaRequired?: boolean;
+            };
         };
         PatchTenantInput: {
             name?: string | null;
             /** @enum {string} */
             status?: "active" | "disabled";
+            settings?: {
+                loginCaptchaRequired?: boolean;
+            };
         };
         TenantCollection: {
             data: {

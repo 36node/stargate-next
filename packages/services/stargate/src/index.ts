@@ -34,6 +34,7 @@ export type {
   TenantInput,
   TenantPatchInput,
   TenantScope,
+  TenantSettings,
   TenantStatus,
 } from "./contracts";
 export {
