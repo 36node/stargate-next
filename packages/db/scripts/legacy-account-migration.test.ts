@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import {
   accountId,
@@ -27,16 +26,11 @@ const validUser = {
 
 describe("legacy account migration", () => {
   it("keeps legacy ids for UAT and derives tenant-scoped ids for PR environments", () => {
-    assert.equal(
-      accountId("legacy-1", "mekong-next-uat", "legacy"),
-      "legacy-1"
-    );
-    assert.equal(
-      accountId("legacy-1", "mekong-next-pr-123", "derived"),
+    expect(accountId("legacy-1", "mekong-next-uat", "legacy")).toBe("legacy-1");
+    expect(accountId("legacy-1", "mekong-next-pr-123", "derived")).toBe(
       "mig_1043bbd6ce01635de09d4c8af4cf489b"
     );
-    assert.notEqual(
-      accountId("legacy-1", "mekong-next-pr-123", "derived"),
+    expect(accountId("legacy-1", "mekong-next-pr-123", "derived")).not.toBe(
       accountId("legacy-1", "mekong-next-pr-124", "derived")
     );
   });
@@ -48,11 +42,11 @@ describe("legacy account migration", () => {
       "legacy"
     );
 
-    assert.equal(migrated.username, "admin.user");
-    assert.equal(migrated.email, "user@example.com");
-    assert.equal(migrated.phone, "+8613800000000");
-    assert.equal(migrated.status, "disabled");
-    assert.equal(migrated.passwordAlgorithm, "legacy-md5");
+    expect(migrated.username).toBe("admin.user");
+    expect(migrated.email).toBe("user@example.com");
+    expect(migrated.phone).toBe("+8613800000000");
+    expect(migrated.status).toBe("disabled");
+    expect(migrated.passwordAlgorithm).toBe("legacy-md5");
   });
 
   it("keeps the canonical older account and reports normalized username conflicts", () => {
@@ -69,11 +63,10 @@ describe("legacy account migration", () => {
     ];
     const migrated = transformLegacyUsers(source, "mekong-next-uat", "legacy");
 
-    assert.deepEqual(
-      migrated.accounts.map(({ id, username }) => ({ id, username })),
-      [{ id: "legacy-1", username: "test1" }]
-    );
-    assert.deepEqual(migrated.skippedUsers, [
+    expect(
+      migrated.accounts.map(({ id, username }) => ({ id, username }))
+    ).toEqual([{ id: "legacy-1", username: "test1" }]);
+    expect(migrated.skippedUsers).toEqual([
       {
         legacyUserId: "legacy-2",
         reason: "username conflicts after normalization",
@@ -93,7 +86,7 @@ describe("legacy account migration", () => {
       "legacy"
     );
 
-    assert.equal(migrated.id, "64b000000000000000000001");
+    expect(migrated.id).toBe("64b000000000000000000001");
   });
 
   it("preserves passwordChangedAt when it is valid", () => {
@@ -103,8 +96,7 @@ describe("legacy account migration", () => {
       "legacy"
     );
 
-    assert.equal(
-      migrated.passwordChangedAt.getTime(),
+    expect(migrated.passwordChangedAt.getTime()).toBe(
       validUser.passwordChangedAt.getTime()
     );
   });
@@ -117,27 +109,24 @@ describe("legacy account migration", () => {
         "legacy"
       );
 
-      assert.equal(
-        migrated.passwordChangedAt.getTime(),
+      expect(migrated.passwordChangedAt.getTime()).toBe(
         validUser.createdAt.getTime()
       );
     }
   });
 
   it("rejects an account when both password timestamps are invalid", () => {
-    assert.throws(
-      () =>
-        transformLegacyUser(
-          {
-            ...validUser,
-            createdAt: undefined,
-            passwordChangedAt: undefined,
-          },
-          "mekong-next-uat",
-          "legacy"
-        ),
-      PasswordChangedAtError
-    );
+    expect(() =>
+      transformLegacyUser(
+        {
+          ...validUser,
+          createdAt: undefined,
+          passwordChangedAt: undefined,
+        },
+        "mekong-next-uat",
+        "legacy"
+      )
+    ).toThrow(PasswordChangedAtError);
   });
 
   it("normalizes surrounding whitespace in legacy ids", () => {
@@ -147,12 +136,11 @@ describe("legacy account migration", () => {
       "derived"
     );
 
-    assert.equal(migrated.id, "mig_1043bbd6ce01635de09d4c8af4cf489b");
+    expect(migrated.id).toBe("mig_1043bbd6ce01635de09d4c8af4cf489b");
   });
 
   it("fails fast for empty sources and reports malformed users", () => {
-    assert.throws(
-      () => transformLegacyUsers([], "mekong-next-uat", "legacy"),
+    expect(() => transformLegacyUsers([], "mekong-next-uat", "legacy")).toThrow(
       EmptyUsersError
     );
     const migrated = transformLegacyUsers(
@@ -161,26 +149,23 @@ describe("legacy account migration", () => {
       "legacy"
     );
 
-    assert.equal(migrated.accounts.length, 0);
-    assert.match(migrated.skippedUsers[0]?.reason ?? "", ActiveTypeError);
+    expect(migrated.accounts.length).toBe(0);
+    expect(migrated.skippedUsers[0]?.reason ?? "").toMatch(ActiveTypeError);
   });
 
   it("rejects malformed source status values", () => {
-    assert.throws(
-      () =>
-        transformLegacyUser(
-          { ...validUser, active: "false" },
-          "mekong-next-uat",
-          "legacy"
-        ),
-      ActiveTypeError
-    );
+    expect(() =>
+      transformLegacyUser(
+        { ...validUser, active: "false" },
+        "mekong-next-uat",
+        "legacy"
+      )
+    ).toThrow(ActiveTypeError);
   });
 
   it("requires every account to be present in verify mode", () => {
-    assert.doesNotThrow(() => assertAccountMigrationComplete(0));
-    assert.throws(
-      () => assertAccountMigrationComplete(1),
+    expect(() => assertAccountMigrationComplete(0)).not.toThrow();
+    expect(() => assertAccountMigrationComplete(1)).toThrow(
       IncompleteMigrationError
     );
   });

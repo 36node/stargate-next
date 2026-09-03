@@ -9,6 +9,8 @@
       "dependsOn": ["^build", "test"],
       "outputs": [
         "dist/**",
+        "dist/*.js",
+        "dist/*.d.ts",
         ".next/**",
         "!.next/cache/**",
         "**/generated/**",
@@ -20,6 +22,8 @@
       "dependsOn": ["^build:ci"],
       "outputs": [
         "dist/**",
+        "dist/*.js",
+        "dist/*.d.ts",
         ".next/**",
         "!.next/cache/**",
         "**/generated/**",

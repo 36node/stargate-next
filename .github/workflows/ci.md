@@ -1,11 +1,37 @@
 # CI 工作流
 
-CI 工作流会先验证 workspace；仅测试通过后才构建并推送 Docker 镜像到 Harbor。主分支推送和手动触发还会构建并推送 Helm Chart，不执行部署。
+CI 工作流会先验证 workspace 格式与边界，再运行测试与构建；仅测试通过后才构建并推送 Docker 镜像到 Harbor。主分支推送和手动触发还会构建并推送 Helm Chart；PR 与 main 推送会触发部署。
 
 | 应用 | Harbor 镜像 |
-| --- | --- | --- |
+| --- | --- |
 | Stargate Next | `harbor.36node.com/stargate/stargate-next` |
 | Playground | `harbor.36node.com/stargate/playground` |
+| DB | `harbor.36node.com/stargate/db` |
+
+## Job 概览
+
+| Job | 职责 |
+| --- | --- |
+| `check` | `pnpm check`（Biome/Ultracite）与 legacy `apps/stargate` workspace 隔离守卫 |
+| `test-and-build` | 数据库迁移、测试、黑盒测试、构建与 Docker 镜像 |
+| `build-helm-chart` | 打包并推送 Helm Chart（依赖 `check` 成功） |
+| `deploy` | 部署到 PR 或 UAT 环境（依赖 `check`、`test-and-build`、`build-helm-chart` 均成功） |
+
+`check` 与 `test-and-build` 并行运行；格式或 workspace 边界检查失败时，`deploy` 不会执行。
+
+## legacy `apps/stargate`
+
+`apps/stargate` 是独立旧 Auth 参考服务，**不在 pnpm workspace 内**（见 `pnpm-workspace.yaml` 的 `!apps/stargate`）。CI 的 `check` Job 会校验其未出现在 workspace 包列表与根 `pnpm-lock.yaml` 中。本地启动 legacy 服务使用 `pnpm dev:stargate`。
+
+## 本地 CI
+
+```bash
+bash scripts/stargate-ci-local.sh
+bash scripts/stargate-ci-local.sh stargate-next
+bash scripts/stargate-ci-local.sh --skip-migration-tests
+```
+
+脚本覆盖 `pnpm check`、`pnpm typecheck`、`pnpm test` 与 `@repo/db test:migration`，不执行部署或镜像推送。
 
 常规 CI 使用分支、PR 和输入指纹标签；Release 工作流在发布版本后推送版本号与 `latest` 标签。
 
