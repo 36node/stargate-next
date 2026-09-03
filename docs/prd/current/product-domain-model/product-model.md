@@ -31,7 +31,7 @@ Stargate Next 通过“身份认证与业务授权分离”解决这些问题。
 3. **JWT 最小化**：JWT 只表达租户、账户与会话身份，不携带业务授权快照。
 4. **授权实时生效**：组织、角色和直接权限变更后，无需重新登录或重新签发 JWT。
 5. **契约优先**：OpenAPI 是公开接口的唯一契约来源，Playground 和 Mekong 通过生成的 SDK 调用。
-6. **安全默认**：密码、Captcha、Refresh Key、日志和审计均遵循最小暴露原则。
+6. **安全默认**：密码、Captcha、Refresh Key、日志和审计均遵循最小暴露原则；Tenant 只有显式关闭时才允许登录跳过 Captcha。
 7. **整体切换**：不长期双写，不允许新旧 Auth 同时签发 Session。
 8. **渐进交付**：先完成认证核心和 Playground 自验收，再进行真实 Mekong 集成与数据迁移。
 
@@ -66,11 +66,11 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 
 | 对象 | 所有者 | 产品含义 |
 | --- | --- | --- |
-| Tenant | Stargate Next | 认证数据的逻辑隔离边界；不是业务组织或授权对象。 |
+| Tenant | Stargate Next | 认证数据的逻辑隔离边界，并持有该边界内的认证设置；不是业务组织或授权对象。 |
 | Tenant API Key | Stargate Next | 固定归属一个 Tenant 的服务凭证；明文只在创建时返回一次。 |
 | Account | Stargate Next | 可被认证的稳定人员主体，包含登录标识与状态。 |
 | Credential | Stargate Next | Account 的当前密码凭证及修改时间。 |
-| Captcha | Stargate Next / Redis | 登录前使用的短期、一次性人机校验。 |
+| Captcha | Stargate Next / Redis | 按 Tenant 策略在登录前使用的短期、一次性人机校验。 |
 | Session | Stargate Next | Account 的可刷新登录会话。 |
 | Access Token | Stargate Next | 表达 `tenantId`、`accountId` 与 `sessionId` 的短期访问凭证。 |
 | Auth Audit Event | Stargate Next | 登录、刷新、退出、账户和凭证操作的最小安全审计。 |
@@ -84,7 +84,7 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 
 ### 6.1 Stargate Next 拥有
 
-- Tenant 的稳定 `tenantId`、展示名称与 `active` / `disabled` 状态。
+- Tenant 的稳定 `tenantId`、展示名称、`active` / `disabled` 状态与认证设置。
 - Tenant API Key 的 HMAC 摘要、归属与展示元数据；不保存 Key 明文。
 - `accountId`，由 Stargate Next 生成，默认使用 CUID。
 - 账户状态：`active`、`disabled` 及软删除状态。
@@ -124,9 +124,9 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 
 ### 7.1 登录并加载业务权限
 
-1. 用户请求并提交 Captcha。
-2. 用户使用 username、phone 或 email 与密码登录。
-3. Stargate Next 在同一 Tenant 内校验 Captcha、账户状态和密码，创建 Session。
+1. 用户进入目标 Tenant 的登录流程。
+2. 用户使用 username、phone 或 email 与密码登录；目标 Tenant 要求 Captcha 时，调用方同时创建并提交 `captchaId` 与 `captchaCode`。
+3. Stargate Next 在同一 Tenant 内按设置决定是否校验并消费 Captcha，再校验账户状态和密码并创建 Session。
 4. Stargate Next 返回 `tenantId`、`accountId`、`sessionId`、Access Token 和 Refresh Key。
 5. 业务应用从 JWT 获得 `{ tenantId, accountId, sessionId }` 身份信息。
 6. 业务应用按 `accountId` 从 Mekong 加载 Profile、组织和授权上下文。
@@ -176,10 +176,10 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 
 认证核心：
 
-- Tenant 创建、查询、分页与状态/名称更新，以及 Tenant API Key 生命周期管理。
+- Tenant 创建、查询、分页与状态、名称、登录 Captcha 设置更新，以及 Tenant API Key 生命周期管理。
 - Account 创建、分页查询、单个查询、批量查询、更新、软删除。
 - 密码设置、管理员重置与已登录用户自改；自改失败次数和锁定策略与登录限制独立。
-- Captcha 创建、验证、过期、一次性消费、错误次数和创建频率限制。
+- Captcha 创建、验证、过期、一次性消费、错误次数和创建频率限制，以及按 Tenant 决定登录是否要求 Captcha。
 - 登录、Refresh、Logout。
 - Session 查询、单个撤销和账户级批量撤销。
 - 最小认证审计。
@@ -246,6 +246,18 @@ Playground 验收：
 - `PATCH /v1/tenant-api-keys/{keyId}`
 - `DELETE /v1/tenant-api-keys/{keyId}`
 
+Tenant 的公开表示、创建输入和更新输入包含：
+
+```ts
+type TenantSettings = {
+  loginCaptchaRequired?: boolean;
+};
+```
+
+`settings` 是封闭 JSON object，当前只允许 boolean 类型的 `loginCaptchaRequired`。只有显式 `false` 才关闭登录 Captcha；缺省、`{}` 和显式 `true` 均要求 Captcha。Tenant 响应保留保存后的形态，不把缺省值物化为 `true`，消费者须按 `settings.loginCaptchaRequired !== false` 解释有效行为。Admin 可在 `POST /v1/tenants` 或 `PATCH /v1/tenants/{tenantId}` 中设置该值；更新采用整对象替换，提交 `{}` 可恢复安全默认。单独更新 settings 不记录认证审计；与 status 混合更新时仍只记录既有的 Tenant 启用或停用事件。
+
+Login 请求中的 `captchaId` 与 `captchaCode` 在 OpenAPI 和生成 SDK 中为可选字段，因为是否必填由目标 Tenant 在运行时决定。要求 Captcha 时，服务端仍实施字段、归属、有效期和一次性消费校验；显式关闭时直接进入账号密码与 Login Lock 流程。`POST /v1/captchas` 与 `POST /v1/captchas/verify` 不受该开关影响。
+
 两类改密契约保持独立：
 
 | 操作 | 接口 | 鉴权 | 请求体 | Session 影响 |
@@ -283,6 +295,7 @@ JWT 不得包含 `ns`、`roles`、`permissions` 或 `groups`。
 - 不迁移旧 Session、Captcha、Group、Role collection 或未确认使用的 Namespace 扩展字段。
 - 不提供通用短信、邮件、字典、报表或数据清理能力。
 - 不提供未登录密码找回或通过邮箱、手机验证码重置密码。
+- 不提供公开的 Tenant 认证设置发现接口、终端用户自助配置入口或前端设置界面。
 - 不在本期升级密码强度或密码哈希策略，也不把用户自改密码并入 Account `PATCH`。
 - 不在 MVP 实现 Refresh rotation/reuse detection。
 - 不在 MVP 实现 RS256、JWKS、OIDC Provider、Client Credential、OAuth/Federation、OTP 登录、KYC 或设备凭证。
@@ -295,6 +308,7 @@ JWT 不得包含 `ns`、`roles`、`permissions` 或 `groups`。
 - Account 的规范化、唯一性、状态、管理员重置、用户自改密码和软删除行为符合契约。
 - 正确密码、错误密码、禁用和删除账户场景均得到稳定结果。
 - Captcha 具备 TTL、一次性消费、错误次数与频率限制。
+- Tenant 缺省或显式启用时登录要求 Captcha；仅显式关闭的 Tenant 可省略 Captcha，且不放宽密码、状态、锁定或隔离规则。
 - Login、Refresh、Logout、用户自改密码和 Session revoke 可通过真实 PostgreSQL、Redis 和运行中服务完成黑盒验收。
 - 用户自改成功后当前 Session 可继续 Refresh、其他 Session 失效；失败或锁定时密码与全部 Session 均保持不变。
 - API、SDK、日志和审计不泄露密码、Captcha、Token 或内部 hash。

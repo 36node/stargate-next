@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | Tenant（租户） | Stargate Next 认证数据的逻辑隔离边界。 | 不等于旧 Auth Namespace、Mekong Organization、Role 或 Permission。 |
 | Tenant ID | Tenant 的稳定主键，也是 `x-tenant-id` 与 JWT `tid` 的值。 | 不由 Tenant name 推导，也不是业务授权范围。 |
+| Tenant Settings | Tenant 内认证策略的封闭设置对象，当前包含可选的 `loginCaptchaRequired`。 | 缺省字段不表示关闭 Captcha，设置也不是业务应用授权配置。 |
 | Account（账户） | 可被 Stargate Next 认证的稳定主体。 | 不等于完整业务用户，不包含姓名、组织和权限。 |
 | Account ID | Account 的全局稳定标识，也是 JWT 的 `sub`。新账户默认由 Stargate Next 生成 CUID。 | 不由 username、phone 或 email 推导。 |
 | Login Identifier（登录标识） | 用于定位 Account 的 username、登录 phone 或登录 email。 | 不等于 Mekong 中的业务联系方式。 |
@@ -46,7 +47,7 @@
 
 | 术语 | 定义 | 关键语义 |
 | --- | --- | --- |
-| Captcha | 登录前的人机验证挑战。 | 短期、一次性、有尝试次数限制。 |
+| Captcha | 可由 Tenant 登录策略要求的人机验证挑战。 | 短期、一次性、有尝试次数限制；策略关闭不禁用挑战接口。 |
 | Login Failure Counter | 按 Tenant 与规范化 login 记录的短期失败次数。 | Captcha 失败和凭证失败都计入，但不得跨 Tenant 累加。 |
 | Login Lock | 失败次数达到阈值后对该 login 的临时阻断。 | 不是 Account Status，不永久修改 Account。 |
 | Password Change Failure Counter | 按 Tenant 与 Account 记录用户自改密码时当前密码错误的短期失败次数。 | 与 Login Failure Counter 使用独立配置和计数键，不影响管理员重置密码。 |
@@ -67,6 +68,13 @@
 - `TENANT_NOT_FOUND`：Admin 控制面按路径查询的 Tenant 不存在。
 - `TENANT_API_KEY_NOT_FOUND`：当前 Tenant 内不存在目标 API Key。
 - `TENANT_API_KEY_SELF_DELETE`：Tenant API Key 尝试删除自身。
+- `PATCH_INVALID`：Tenant 更新体为空、含未知字段，或 `settings` 不是合法的封闭设置对象。
+
+登录 Captcha 使用以下稳定错误码：
+
+- `CAPTCHA_CODE_INVALID`：要求 Captcha 时缺少 `captchaCode`，或请求提供的 `captchaCode` 不是非空字符串。
+- `CAPTCHA_ID_INVALID`：要求 Captcha 时缺少 `captchaId`，或请求提供的 `captchaId` 不是非空字符串。
+- `CAPTCHA_INVALID`：Captcha 不属于目标 Tenant、错误、过期、耗尽或已被消费。
 
 用户自改密码使用以下稳定错误码：
 
@@ -112,7 +120,22 @@
 - Tenant 的 `name` 只是可空展示文本，不参与路由、认证或唯一性判断。
 - Tenant 状态为 `active` 或 `disabled`；disabled 时拒绝管理数据面、Login 与 Refresh。
 
-### 3.2 AccountId
+### 3.2 TenantSettings
+
+`TenantSettings` 是 Tenant 拥有的封闭 JSON object，当前形态为：
+
+```ts
+type TenantSettings = {
+  loginCaptchaRequired?: boolean;
+};
+```
+
+- 缺省、`{}` 或显式 `true` 均表示登录要求 Captcha；只有显式 `false` 表示登录跳过 Captcha。
+- Tenant 对外表示保留持久化形态，不把缺省值物化为 `true`；消费者按 `loginCaptchaRequired !== false` 解释有效策略。
+- 创建与更新只接受 boolean 类型的已知字段，不接受 `null`、数组、标量或未知 key。
+- 更新采用整对象替换而非字段合并；提交 `{}` 会恢复默认要求 Captcha。
+
+### 3.3 AccountId
 
 `AccountId` 是不可变字符串值对象：
 
@@ -122,7 +145,7 @@
 - Auth 与 Mekong 使用完全相同的字符串值关联数据。
 - `AccountId` 不是两个数据库之间的外键，跨库一致性由编排和对账保证。
 
-### 3.3 SessionId
+### 3.4 SessionId
 
 `SessionId` 是 Session 的不可变标识：
 
@@ -131,7 +154,7 @@
 - MVP Refresh 不生成新 SessionId。
 - Session 被撤销后，原 SessionId 不得重新用于新 Session。
 
-### 3.4 LoginIdentifier
+### 3.5 LoginIdentifier
 
 `LoginIdentifier` 是 username、phone 或 email 三种值对象的联合概念。三种标识在同一 Tenant 的 Account 中分别唯一，并在查询前采用与写入一致的规范化规则；跨 Tenant 可重复。
 
@@ -161,7 +184,7 @@
 
 phone/email 只在承担登录语义时属于 LoginIdentifier。Mekong 中的 contact phone/email 是不同值对象，即使字符串相同也不能隐式同步。
 
-### 3.5 PasswordCredential
+### 3.6 PasswordCredential
 
 MVP 的 `PasswordCredential` 由以下值组成：
 
@@ -178,7 +201,7 @@ MVP 的 `PasswordCredential` 由以下值组成：
 - 凭证属于 Account 认证边界，不单独成为可公开查询的实体。
 - `legacy-md5` 只用于 MVP 兼容，不代表目标安全算法。
 
-### 3.6 RefreshKeyDigest
+### 3.7 RefreshKeyDigest
 
 `RefreshKeyDigest` 是服务端持有的值对象：
 
@@ -189,7 +212,7 @@ MVP 的 `PasswordCredential` 由以下值组成：
 - primary 与 secondary 的 key ID 和 secret 必须分别不同。
 - key ID 与 hash 必须按同一组 secret 计算，禁止跨组拼接匹配。
 
-### 3.7 TenantApiKeyDigest
+### 3.8 TenantApiKeyDigest
 
 `TenantApiKeyDigest` 是 `{ hmacKeyId, hash }` 值对象：
 
@@ -198,7 +221,7 @@ MVP 的 `PasswordCredential` 由以下值组成：
 - 明文只在创建响应出现一次；列表、审计、日志和数据库均不得包含明文。
 - `firstFour` 仅是随机主体前四位的展示元数据，不参与认证。
 
-### 3.8 AccessTokenClaims
+### 3.9 AccessTokenClaims
 
 MVP 的 Access Token 只允许包含：
 
@@ -215,7 +238,7 @@ MVP 的 Access Token 只允许包含：
 
 校验成功建立 `{ tenantId, accountId, sessionId }`；`tid` 是认证隔离事实，不是 Mekong 业务授权事实。
 
-### 3.9 IdempotencyKey
+### 3.10 IdempotencyKey
 
 Account 创建命令可携带 `IdempotencyKey`：
 
@@ -323,7 +346,7 @@ AuthAuditEvent 是不可变、仅追加的安全事实实体。
 - Account 创建、更新、禁用和删除。
 - 管理员重置密码与用户自改密码，并使用不同事件语义；用户自改的 actor 为该 Account。
 - Session 撤销。
-- Tenant 创建、启用、停用，以及 Tenant API Key 创建、删除。
+- Tenant 创建、启用、停用，以及 Tenant API Key 创建、删除；Tenant 认证设置更新不单独记录审计。
 
 审计事件不强制外键关联 Account 或 Session，以便主体或 Session 删除后仍保留历史。metadata 禁止包含密码、Captcha code、Access Token、Refresh Key 或任何凭证 hash。
 
@@ -341,7 +364,23 @@ Playground 中的同名对象是测试替身，只用于验证契约和场景，
 
 ## 5. 聚合与一致性边界
 
-### 5.1 Account 聚合
+### 5.1 Tenant 聚合
+
+聚合根：`Tenant`。
+
+Tenant 拥有 TenantId、name、status 与 TenantSettings。Tenant API Key 是独立凭证实体并引用 Tenant；Tenant disabled 不删除 Account、Session、Key 或历史审计。Tenant 名称更新不改变路由，`default` Tenant 不允许改名。
+
+主要命令：
+
+- CreateTenant。
+- RenameTenant。
+- EnableTenant。
+- DisableTenant。
+- UpdateTenantSettings。
+
+创建与设置更新必须先校验完整 TenantSettings。非法创建使用 `BODY_INVALID`，非法更新使用 `PATCH_INVALID`。设置更新不产生独立 AuthAuditEvent；与 status 混合更新时仅按既有规则记录 `tenant.enabled` 或 `tenant.disabled`，组合更新仍在同一数据库事务中完成。
+
+### 5.2 Account 聚合
 
 聚合根：`Account`。
 
@@ -369,9 +408,7 @@ Playground 中的同名对象是测试替身，只用于验证契约和场景，
 
 Account 聚合内的字段修改应在单一数据库事务中保持一致。管理员重置、用户自改成功、删除等同时撤销 Session 的用例需要应用服务协调 Account 与 Session repository，并在 Stargate Next 数据库事务中完成；自改失败不得产生凭证或 Session 变更。
 
-Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant；Tenant disabled 不删除 Account、Session、Key 或历史审计。Tenant 名称更新不改变路由，`default` Tenant 不允许改名。
-
-### 5.2 Session 聚合
+### 5.3 Session 聚合
 
 聚合根：`Session`。
 
@@ -394,7 +431,7 @@ Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant
 - 用户自改失败或处于锁定期时不得撤销任何 Session。
 - 禁用 Account 后即使 Session 尚未删除，也必须立即拒绝 Refresh；业务禁用流程还应显式批量撤销 Session。
 
-### 5.3 Captcha 聚合
+### 5.4 Captcha 聚合
 
 聚合根：`CaptchaChallenge`。
 
@@ -402,13 +439,13 @@ Captcha 的创建、尝试计数和消费必须以 Redis 原子操作维持一�
 
 Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure Counter 是相互独立的短期策略状态，不是 CaptchaChallenge 的属性。
 
-### 5.4 Audit 聚合
+### 5.5 Audit 聚合
 
 聚合根：`AuthAuditEvent`。
 
 每个事件独立追加，不允许更新或删除。审计写入由应用用例触发，但审计记录不反向控制 Account 或 Session 状态。
 
-### 5.5 Mekong 聚合
+### 5.6 Mekong 聚合
 
 真实 Mekong 集成阶段预期包含：
 
@@ -427,7 +464,7 @@ Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure C
 1. 精确解析 Tenant，并确认状态为 `active`。
 2. 规范化 login。
 3. 检查该 Tenant 的 Login Lock。
-4. 在该 Tenant 验证并消费 Captcha。
+4. 读取 TenantSettings；仅当 `loginCaptchaRequired !== false` 时，要求并在该 Tenant 验证、消费 Captcha。
 5. 在该 Tenant 按任一 LoginIdentifier 查找 Account。
 6. 统一校验 Account 状态、删除状态、密码算法和密码。
 7. 创建带相同 TenantId 的 Session 与 Refresh Key。
@@ -435,6 +472,8 @@ Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure C
 9. 只清除该 Tenant 的登录失败计数并记录审计。
 
 为避免账户枚举，对“账户不存在、状态不可用、密码错误”等场景应返回统一的登录失败语义。
+
+Login 的 `captchaId` 与 `captchaCode` 在公开契约中可选，但要求 Captcha 的 Tenant 会在运行时实施条件必填：缺少字段分别返回 `CAPTCHA_CODE_INVALID` 或 `CAPTCHA_ID_INVALID`，无效挑战返回 `CAPTCHA_INVALID`。显式关闭 Captcha 只跳过第 4 步，不改变 Tenant 状态、Login Lock、Account 或密码校验，也不关闭 Captcha 创建与独立验证能力。
 
 ### 6.2 Refresh Service
 
@@ -609,6 +648,8 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 
 ### 8.1 Tenant 与 Account
 
+- TenantSettings 必须是封闭 JSON object；`loginCaptchaRequired` 只有显式 `false` 才关闭登录 Captcha。
+- Tenant 设置更新不产生独立审计事件；与 status 混合更新时只记录对应状态事件。
 - 有效 Account 必须有且仅有一个 username。
 - 规范化后的 username、phone、email 分别在 Tenant 内唯一。
 - Account、Session、Captcha、Login Lock、Password Change Failure Counter / Lock、Idempotency Key 与 AuthAuditEvent 均属于一个 Tenant；任何读取和写入都必须携带 Tenant 过滤。
@@ -638,6 +679,7 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - Captcha code 不得明文持久化。
 - Captcha 只能成功消费一次。
 - Captcha 创建按 Tenant 与客户端 IP 限流。
+- 登录是否要求 Captcha 由目标 Tenant 决定；Captcha 创建和独立验证能力不随该设置关闭。
 - 登录失败按 Tenant 与规范化 login 限流。
 - 用户自改密码的当前密码失败按 Tenant 与 Account 限流，且不与登录失败共享配置或计数。
 - Captcha 与 JWT、Refresh Key 不得复用 HMAC/signing secret。

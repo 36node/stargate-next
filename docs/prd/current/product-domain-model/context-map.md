@@ -59,7 +59,7 @@ flowchart LR
 
 | 上下文 | 所有者 | 拥有 | 不拥有 |
 | --- | --- | --- | --- |
-| 认证上下文 | Stargate Next | Tenant、Tenant API Key、Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
+| 认证上下文 | Stargate Next | Tenant 及其认证设置、Tenant API Key、Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
 | 业务身份与授权上下文 | Mekong | UserProfile、Organization、Membership、Role、Permission、Authorization Context | 密码、Account 状态、Auth Session |
 | 业务应用上下文 | bus-admin-web | 页面和业务用例、受保护资源 | 认证或授权主数据 |
 | Playground 验收上下文 | Stargate Next 项目 | 测试用业务客户端、slim session、Mekong test double | 生产或迁移数据 |
@@ -85,6 +85,7 @@ flowchart LR
 - OpenAPI 是唯一契约来源。
 - JWT 只包含 `sub`、`sid`、`tid`、`type`、`iat`、`exp`。
 - Account、Session、Captcha、限流和认证审计均以 `tenantId` 隔离；缺少 Tenant header 的兼容调用落入 `default`。
+- Tenant 的登录 Captcha 设置由 Auth 拥有并通过 OpenAPI 与生成 SDK 发布；只有显式 `false` 才关闭登录 Captcha。
 - 登录、Refresh、Logout、用户自改密码、Account 和 Session 管理具有稳定语义。
 
 下游约束：
@@ -147,7 +148,7 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 
 认证上下文发布以下能力：
 
-- Tenant 控制面，以及单一 Tenant 内的 Tenant API Key 管理。
+- Tenant 控制面（包括登录 Captcha 设置），以及单一 Tenant 内的 Tenant API Key 管理。
 - Captcha 创建和验证。
 - Login、Refresh、Logout。
 - 使用 Bearer Access Token 的用户自改密码。
@@ -160,6 +161,7 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 - Auth 响应不包含 Profile 或业务授权。
 - API、日志和审计不暴露密码、Token、Captcha 或内部 hash。
 - API Key 只代表服务调用方，不映射为人员 Principal。
+- Login 的 `captchaId` 与 `captchaCode` 在 Published Language 中可选，由 Auth 根据目标 Tenant 设置实施条件必填；调用方按 `settings.loginCaptchaRequired !== false` 解释有效策略。
 - 用户自改密码只接受 Bearer Access Token，并从 `tid`、`sub`、`sid` 确定 Tenant、Account 和当前 Session；不得通过 API Key 代用该语义。
 - Admin API Key 是平台控制面凭证；兼容 Service API Key 固定 `default`；Tenant API Key 固定所属 Tenant。三者都不是业务授权主体。
 - 数据面通过 `x-tenant-id` 选择或校验单一 Tenant；Tenant 控制面不得被 client 级 Tenant header 污染。
@@ -171,6 +173,8 @@ Access Token 只建立 Principal。`tenantId` 只说明该 Principal 来自哪�
 登录：
 
 `App -> Auth login -> Principal -> Mekong Authorization Context -> protected resource`
+
+Auth 在登录边界内解析 TenantSettings 并决定是否验证、消费 Captcha；关闭 Captcha 不改变后续 Account、PasswordCredential、Login Lock、Session 或 Token 语义。业务应用不拥有或复制该认证策略，当前也不通过公开匿名接口发现 Tenant 设置。
 
 创建业务用户：
 

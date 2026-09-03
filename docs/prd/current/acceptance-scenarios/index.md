@@ -284,3 +284,91 @@
 **验证**
 
 - Playground 端到端或手动验收：登录 → 自改密码 → 旧密码登录失败 → 新密码登录成功。
+
+### Tenant 缺省或显式启用时要求登录 Captcha
+
+此场景源自 [202609-01 租户登录验证码配置](../../features/202609-01-tenant-captcha-settings.md) 的历史记录，并在本目录维护其当前版本。
+
+**关联规范**
+
+- [产品模型：登录并加载业务权限](../product-domain-model/product-model.md)
+- [领域概念：Authentication Service](../product-domain-model/domain-concepts.md)
+
+**Given**
+
+- 一个 `active` Tenant，其 `settings` 为 `{}`、未包含 `loginCaptchaRequired`，或显式设置为 `true`。
+- Tenant 内存在可登录的 `active` Account。
+
+**When**
+
+- 分别以缺少 Captcha 字段、错误或过期 Captcha、正确 Captcha 调用 `POST /v1/auth/login`。
+
+**Then**
+
+- 缺少 `captchaCode` 时返回 `CAPTCHA_CODE_INVALID`；已提供合法 code 但缺少 `captchaId` 时返回 `CAPTCHA_ID_INVALID`。
+- 错误、过期、耗尽、已消费或属于其他 Tenant 的挑战返回 `CAPTCHA_INVALID`，不签发 Token，并按现有规则计入该 Tenant 的 Login Failure Counter。
+- 正确 Captcha 与正确账号密码组合可以登录。
+- 迁移前既有 Tenant 以 `{}` 保持安全默认，登录行为不因增加设置字段而放宽。
+
+**验证**
+
+- API 黑盒测试覆盖缺少字段、无效挑战与正确 Captcha。
+- 数据库迁移检查 `settings` 的非空 `{}` 默认值和 JSON object 约束。
+
+### 单一 Tenant 关闭登录 Captcha
+
+**关联规范**
+
+- [产品模型：登录并加载业务权限](../product-domain-model/product-model.md)
+- [领域概念：TenantSettings](../product-domain-model/domain-concepts.md)
+
+**Given**
+
+- 两个相互隔离的 `active` Tenant，均存在使用正确密码的可登录 Account。
+- Admin 将 Tenant A 的设置更新为 `{ "loginCaptchaRequired": false }`，Tenant B 保持缺省设置。
+
+**When**
+
+- 调用方在两个 Tenant 均省略 `captchaId` 与 `captchaCode` 发起登录。
+
+**Then**
+
+- Tenant A 跳过 Captcha 校验并登录成功。
+- Tenant B 仍返回 `CAPTCHA_CODE_INVALID`。
+- 关闭 Captcha 不放宽 Account 状态、密码、Login Lock 或 Tenant 隔离规则。
+- `POST /v1/captchas` 与 `POST /v1/captchas/verify` 在 Tenant A 仍可使用。
+
+**验证**
+
+- PostgreSQL/Redis 租户集成测试覆盖设置前后登录行为和跨 Tenant 隔离。
+- OpenAPI 与 SDK 契约检查 Login 的两个 Captcha 字段均为可选。
+
+### Admin 管理 Tenant 登录 Captcha 设置
+
+**关联规范**
+
+- [产品模型：对外身份契约](../product-domain-model/product-model.md)
+- [领域概念：Tenant 聚合](../product-domain-model/domain-concepts.md)
+
+**Given**
+
+- 调用方持有有效 Admin API Key。
+
+**When**
+
+- 创建 Tenant 时提交 `{ "settings": { "loginCaptchaRequired": false } }`。
+- 对该 Tenant 提交 `settings: {}` 或 `{ "loginCaptchaRequired": true }` 恢复要求 Captcha。
+- 分别提交非 object 的 `settings`、非 boolean 值或未知设置字段。
+
+**Then**
+
+- Tenant 创建、读取、列表和更新响应均包含保存后的 `settings`，缺省值不被物化为 `true`。
+- `PATCH` 以完整对象替换设置；`{}` 与显式 `true` 均恢复要求 Captcha。
+- 非法创建返回 `BODY_INVALID`，非法更新返回 `PATCH_INVALID`，原设置不变。
+- 单独更新 settings 不产生 AuthAuditEvent；与 status 混合更新时只产生对应的 `tenant.enabled` 或 `tenant.disabled` 事件。
+- 不新增公开设置发现接口、终端用户自助入口或前端配置界面。
+
+**验证**
+
+- Tenant 服务集成测试覆盖创建、更新、恢复默认、非法设置、响应形态，以及纯 settings 与混合 status 更新的审计边界。
+- OpenAPI 与生成 SDK 的 Tenant 类型均包含 `settings.loginCaptchaRequired?: boolean`。
