@@ -3,3 +3,12 @@ packages:
   - "!apps/stargate"
   - "packages/*"
   - "packages/services/*"
+
+catalogs:
+  zod:
+    zod: ^4.4.3
+
+packageExtensions:
+  "@hookform/resolvers@^5":
+    peerDependencies:
+      zod: ^4.4.3
