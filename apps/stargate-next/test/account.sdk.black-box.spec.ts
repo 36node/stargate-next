@@ -1,7 +1,7 @@
 import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
-import { env, uniqueUsername } from "./support/black-box";
+import { env, uniqueUsername } from "./support/black-box.js";
 
 async function expectApiError(
   promise: Promise<unknown>,

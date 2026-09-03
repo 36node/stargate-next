@@ -4,8 +4,8 @@ export {
   signAccessToken,
   verifyAccessToken,
   verifyAuthorizationHeader,
-} from "./access-token";
-export { loadStargateConfig, type StargateConfig } from "./config";
+} from "./access-token.js";
+export { loadStargateConfig, type StargateConfig } from "./config.js";
 export type {
   AccessTokenClaims,
   AccountCollection,
@@ -36,13 +36,13 @@ export type {
   TenantScope,
   TenantSettings,
   TenantStatus,
-} from "./contracts";
+} from "./contracts.js";
 export {
   StargateServiceError,
   serviceError,
-} from "./errors";
+} from "./errors.js";
 export {
   checkStargateHealth,
   createStargateService,
   StargateService,
-} from "./service";
+} from "./service.js";

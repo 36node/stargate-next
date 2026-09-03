@@ -116,8 +116,11 @@ export function optionalNullableString(
   value: unknown,
   code: BodyErrorCode
 ): string | null | undefined {
-  if (value === undefined || value === null) {
-    return value;
+  if (value === undefined) {
+    return;
+  }
+  if (value === null) {
+    return null;
   }
   if (typeof value !== "string") {
     badRequest(code, "field must be a string or null");

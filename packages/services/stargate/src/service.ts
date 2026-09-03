@@ -24,8 +24,8 @@ import {
   ACCESS_TOKEN_INVALID_MESSAGE,
   signAccessToken,
   verifyAuthorizationHeader,
-} from "./access-token";
-import { loadStargateConfig, type StargateConfig } from "./config";
+} from "./access-token.js";
+import { loadStargateConfig, type StargateConfig } from "./config.js";
 import type {
   AccessTokenClaims,
   AccountCollection,
@@ -55,8 +55,8 @@ import type {
   TenantScope,
   TenantSettings,
   TenantStatus,
-} from "./contracts";
-import { serviceError } from "./errors";
+} from "./contracts.js";
+import { serviceError } from "./errors.js";
 
 const DEFAULT_TENANT_ID = "default";
 const TENANT_ID_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;

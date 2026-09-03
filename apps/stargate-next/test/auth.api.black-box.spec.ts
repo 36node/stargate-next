@@ -3,7 +3,7 @@ import { createHmac, randomBytes } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { env, request, uniqueUsername } from "./support/black-box";
+import { env, request, uniqueUsername } from "./support/black-box.js";
 
 type ErrorBody = { code: string; message: string };
 type Tokens = {

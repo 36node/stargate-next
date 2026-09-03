@@ -18,7 +18,7 @@ import type {
 } from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
-import { STARGATE_SERVICE } from "../auth/stargate-service.module";
+import { STARGATE_SERVICE } from "../auth/stargate-service.module.js";
 import {
   allowedKeysOnly,
   optionalNullableString,
@@ -27,7 +27,7 @@ import {
   plainObjectBody,
   requestContext,
   singleQueryValue,
-} from "../platform/request-context";
+} from "../platform/request-context.js";
 
 @Controller("v1/tenants")
 export class TenantController {

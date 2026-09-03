@@ -2,6 +2,10 @@
  * 幂等创建内置 default Tenant，不覆盖其后续人工状态变更。
  */
 
+import "dotenv/config";
+
+import { fileURLToPath } from "node:url";
+
 import { db } from "@repo/db";
 
 export async function seedDefaultTenant(): Promise<{ created: boolean }> {
@@ -33,7 +37,11 @@ async function main(): Promise<void> {
   await db.$disconnect();
 }
 
-if (require.main === module) {
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isEntrypoint) {
   main().catch((error: unknown) => {
     console.error(error);
     process.exitCode = 1;

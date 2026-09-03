@@ -1,7 +1,7 @@
 /** Multi-tenant HTTP 越权、错误矩阵与 Tenant API Key 黑盒回归。 */
 import { describe, expect, it } from "vitest";
 
-import { env, login, request } from "./support/black-box";
+import { env, login, request } from "./support/black-box.js";
 
 const adminApiKey = env("STARGATE_ADMIN_API_KEY");
 const TENANT_API_KEY_PATTERN = /^stk_[A-Za-z0-9_-]{32}$/;

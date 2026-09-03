@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { env, request } from "./support/black-box";
+import { env, request } from "./support/black-box.js";
 
 const CAPTCHA_CODE_PATTERN = /^[ABCDHJKLMNPQRSTUVWXYZ123456789]{4}$/;
 const CAPTCHA_IMAGE_PATTERN = /^data:image\/svg\+xml;base64,/;

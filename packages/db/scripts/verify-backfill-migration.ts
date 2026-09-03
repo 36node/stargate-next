@@ -13,12 +13,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { inspect, isDeepStrictEqual } from "node:util";
 
 import { type DatabaseError, Pool } from "pg";
 
-const DB_ROOT = resolve(__dirname, "..");
+const require = createRequire(import.meta.url);
+const DB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROBE_ROOT = join(DB_ROOT, ".probe");
 const CURRENT_SCHEMA = join(DB_ROOT, "prisma", "schema.prisma");
 const CURRENT_MIGRATION = join(

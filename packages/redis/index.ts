@@ -1,4 +1,4 @@
-import IORedis, { type Redis } from "ioredis";
+import { Redis } from "ioredis";
 
 let clientSingleton: Redis | undefined;
 
@@ -20,7 +20,7 @@ const getErrorMessage = (error: unknown): string =>
  */
 export function getRedisClient(): Redis {
   if (!clientSingleton || clientSingleton.status === "end") {
-    clientSingleton = new IORedis(redisUrl, {
+    clientSingleton = new Redis(redisUrl, {
       commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
       connectTimeout: REDIS_CONNECT_TIMEOUT_MS,
       keepAlive: 30_000,

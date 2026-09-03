@@ -18,7 +18,7 @@
 - runner 使用 `pnpm deploy --legacy --prod --os=linux --cpu=x64 --libc=musl` 生成 app-local `deploy`；Dockerfile 不安装依赖、不执行构建。
 - 孤立 production install 使用 `--config.ignore-scripts=true`，避免 `@repo/db` postinstall 因缺少 Prisma CLI 失败。
 - Dockerfile 只复制 `deploy/package.json`、`deploy/node_modules` 和 `dist`。
-- 生产镜像以 UID 1001 的 `nestjs` 用户运行，入口为 `node dist/src/main.js`。
+- 生产镜像以 UID 1001 的 `nestjs` 用户运行，入口为 `node --import tsx dist/main.js`；`tsx` 由 production deploy 提供。
 - runner 需将 `.prisma` 生成物复制进 deploy 虚拟 store。
 
 ### Next standalone (`playground`)

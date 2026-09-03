@@ -110,10 +110,7 @@ restore_prisma_client() {
 prepare_stargate_next() {
   local deploy_dir="$ROOT_DIR/apps/stargate-next/deploy"
 
-  require_path "$ROOT_DIR/apps/stargate-next/dist/src/main.js"
-  require_path "$ROOT_DIR/packages/services/stargate/dist"
-  require_path "$ROOT_DIR/packages/db/dist"
-  require_path "$ROOT_DIR/packages/redis/dist"
+  require_path "$ROOT_DIR/apps/stargate-next/dist/main.js"
 
   deploy_package stargate-next "$deploy_dir"
   cp -R "$ROOT_DIR/apps/stargate-next/dist" "$deploy_dir/dist"
@@ -121,7 +118,7 @@ prepare_stargate_next() {
 
   require_path "$deploy_dir/package.json"
   require_path "$deploy_dir/node_modules"
-  require_path "$deploy_dir/dist/src/main.js"
+  require_path "$deploy_dir/dist/main.js"
   verify_alpine_dependencies "$deploy_dir"
 }
 

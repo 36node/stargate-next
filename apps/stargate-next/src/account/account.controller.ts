@@ -20,13 +20,13 @@ import type {
 } from "@repo/stargate-service/contracts";
 import type { Request } from "express";
 
-import { STARGATE_SERVICE } from "../auth/stargate-service.module";
+import { STARGATE_SERVICE } from "../auth/stargate-service.module.js";
 import {
   parsePage,
   plainObjectBody,
   requestContext,
   tenantHeader,
-} from "../platform/request-context";
+} from "../platform/request-context.js";
 
 const BATCH_MAX_IDS = 100;
 const BATCH_MIN_IDS = 1;

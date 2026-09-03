@@ -1,21 +1,17 @@
 {
   "name": "@repo/db",
   "version": "1.2.0",
-  "type": "commonjs",
-  "main": "./dist/index.js",
+  "type": "module",
+  "main": "./index.ts",
   "types": "./index.ts",
   "exports": {
-    ".": {
-      "types": "./index.ts",
-      "require": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
+    ".": "./index.ts"
   },
   "scripts": {
     "analyze": "prisma generate",
     "postinstall": "prisma generate",
-    "build": "prisma generate && tsup index.ts --format cjs --dts --clean",
-    "build:ci": "prisma generate && tsup index.ts --format cjs --dts --clean",
+    "build": "prisma generate",
+    "build:ci": "prisma generate",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "push": "prisma db push",
     "push:force": "prisma db push --force-reset && prisma generate",
@@ -43,9 +39,8 @@
     "@types/node": "24.10.1",
     "@types/pg": "^8.18.0",
     "prisma": "7.9.1",
-    "tsx": "4.23.1",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
+    "tsx": "catalog:toolchain",
+    "typescript": "catalog:toolchain",
     "vitest": "^4.1.9"
   }
 }
