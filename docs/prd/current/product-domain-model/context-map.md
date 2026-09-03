@@ -59,7 +59,7 @@ flowchart LR
 
 | 上下文 | 所有者 | 拥有 | 不拥有 |
 | --- | --- | --- | --- |
-| 认证上下文 | Stargate Next | Tenant、Tenant API Key、Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
+| 认证上下文 | Stargate Next | Tenant 及其认证设置、Tenant API Key、Account、登录标识、PasswordCredential、Captcha、Session、Token、认证审计 | Profile、Organization、Role、Permission |
 | 业务身份与授权上下文 | Mekong | UserProfile、Organization、Membership、Role、Permission、Authorization Context | 密码、Account 状态、Auth Session |
 | 业务应用上下文 | bus-admin-web | 页面和业务用例、受保护资源 | 认证或授权主数据 |
 | Playground 验收上下文 | Stargate Next 项目 | 测试用业务客户端、slim session、Mekong test double | 生产或迁移数据 |
@@ -85,7 +85,8 @@ flowchart LR
 - OpenAPI 是唯一契约来源。
 - JWT 只包含 `sub`、`sid`、`tid`、`type`、`iat`、`exp`。
 - Account、Session、Captcha、限流和认证审计均以 `tenantId` 隔离；缺少 Tenant header 的兼容调用落入 `default`。
-- 登录、Refresh、Logout、Account 和 Session 管理具有稳定语义。
+- Tenant 的登录 Captcha 设置由 Auth 拥有并通过 OpenAPI 与生成 SDK 发布；只有显式 `false` 才关闭登录 Captcha。
+- 登录、Refresh、Logout、用户自改密码、Account 和 Session 管理具有稳定语义。
 
 下游约束：
 
@@ -113,6 +114,8 @@ flowchart LR
 ### 4.3 Playground → Auth 与 Mekong
 
 Playground 对 Auth 是严格消费 OpenAPI 和 SDK 的 **Conformist / Contract Test Consumer**。
+
+已登录用户在 Playground 自改密码时，Playground 服务端从会话 Cookie 读取 Access Token，以 Bearer 身份调用 Auth；用户无需粘贴 Token。该入口与账户管理页使用 API Key 的管理员密码重置保持独立。
 
 Phase A 中，Playground 对 Mekong 是 **Test Double**：
 
@@ -145,10 +148,11 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 
 认证上下文发布以下能力：
 
-- Tenant 控制面，以及单一 Tenant 内的 Tenant API Key 管理。
+- Tenant 控制面（包括登录 Captcha 设置），以及单一 Tenant 内的 Tenant API Key 管理。
 - Captcha 创建和验证。
 - Login、Refresh、Logout。
-- Account 创建、查询、更新、软删除和改密。
+- 使用 Bearer Access Token 的用户自改密码。
+- Account 创建、查询、更新、软删除和管理员密码重置。
 - Session 查询与撤销。
 
 契约约束：
@@ -157,6 +161,8 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 - Auth 响应不包含 Profile 或业务授权。
 - API、日志和审计不暴露密码、Token、Captcha 或内部 hash。
 - API Key 只代表服务调用方，不映射为人员 Principal。
+- Login 的 `captchaId` 与 `captchaCode` 在 Published Language 中可选，由 Auth 根据目标 Tenant 设置实施条件必填；调用方按 `settings.loginCaptchaRequired !== false` 解释有效策略。
+- 用户自改密码只接受 Bearer Access Token，并从 `tid`、`sub`、`sid` 确定 Tenant、Account 和当前 Session；不得通过 API Key 代用该语义。
 - Admin API Key 是平台控制面凭证；兼容 Service API Key 固定 `default`；Tenant API Key 固定所属 Tenant。三者都不是业务授权主体。
 - 数据面通过 `x-tenant-id` 选择或校验单一 Tenant；Tenant 控制面不得被 client 级 Tenant header 污染。
 
@@ -168,17 +174,28 @@ Access Token 只建立 Principal。`tenantId` 只说明该 Principal 来自哪�
 
 `App -> Auth login -> Principal -> Mekong Authorization Context -> protected resource`
 
+Auth 在登录边界内解析 TenantSettings 并决定是否验证、消费 Captcha；关闭 Captcha 不改变后续 Account、PasswordCredential、Login Lock、Session 或 Token 语义。业务应用不拥有或复制该认证策略，当前也不通过公开匿名接口发现 Tenant 设置。
+
 创建业务用户：
 
 1. Mekong 编排调用 Auth 创建 Account，获得 AccountId。
 2. Mekong 在本地事务中创建 Profile、Membership 和授权关系。
 3. Mekong 写入失败时，调用幂等 Account 软删除进行补偿。
 
-禁用与改密：
+禁用与管理员重置密码：
 
 - 禁用由 Auth 修改 Account 状态并撤销全部 Session。
-- 改密只写 Auth，并在同一 Auth 事务中撤销全部 Session。
+- 管理员重置密码只写 Auth，并在同一 Auth 事务中撤销目标 Account 的全部 Session。
 - Mekong 不复制 active 状态或 PasswordCredential。
+
+用户自改密码：
+
+`App session -> Bearer Access Token -> Auth validate current password -> update credential -> revoke other sessions`
+
+- Auth 只允许修改 Principal `accountId` 对应的密码，并受 Principal `tenantId` 隔离。
+- 自改成功后保留 Principal `sessionId` 对应的当前 Session，撤销同一 Account 的其他 Session。
+- 当前密码错误、请求非法或处于自改锁定期时，不修改 PasswordCredential 或任何 Session。
+- 该流程不写入 Mekong，也不经过 API Key 管理接口。
 
 删除业务用户：
 
@@ -191,7 +208,7 @@ Access Token 只建立 Principal。`tenantId` 只说明该 Principal 来自哪�
 
 强一致：
 
-- Auth 单库事务维护 Account、Credential 和相关 Session 变更。
+- Auth 单库事务维护 Account、Credential 和相关 Session 变更，包括管理员重置时撤销全部 Session，以及用户自改成功时保留当前 Session、撤销其他 Session。
 - Mekong 单库事务维护 Profile、Organization、Membership 和授权关系。
 
 最终一致：
