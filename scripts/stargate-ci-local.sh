@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 
-# Run core Stargate Next CI checks locally.
-# Does not deploy, push images, or run Docker bake.
+# Run core Stargate Next CI checks locally, including Docker bake and Alpine smoke.
+# Does not deploy or push images to Harbor.
 #
 # Usage:
-#   bash scripts/stargate-ci-local.sh              # check + typecheck + test + db migration tests
+#   bash scripts/stargate-ci-local.sh              # check + typecheck + test + db migration + docker
 #   bash scripts/stargate-ci-local.sh stargate-next
 #   bash scripts/stargate-ci-local.sh --help
 #
-# Prerequisites for integration or black-box tests:
-#   - PostgreSQL and Redis available (see root .env / DATABASE_URL / REDIS_URL)
+# Prerequisites:
+#   - Docker with Buildx available
+#   - PostgreSQL and Redis for integration or black-box tests (see root .env)
 #   - Run `pnpm db:migrate` before service integration tests
 
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+readonly -a DOCKER_APPS=(stargate-next playground db)
 
 declare -A APP_FILTER=(
   [stargate-next]='stargate-next'
@@ -26,19 +28,20 @@ declare -A APP_FILTER=(
 
 TARGET='all'
 RUN_MIGRATION_TESTS=1
+BUILT_CI=0
 
 usage() {
   cat <<'EOF'
-在本地执行 Stargate Next CI 的核心检查步骤。不执行部署、Harbor 推送或 Docker bake。
+在本地执行 Stargate Next CI 的核心检查步骤，并在通过后构建、验证并清理本地 Docker 镜像。不执行部署或 Harbor 推送。
 
 用法：
   bash scripts/stargate-ci-local.sh [目标] [--skip-migration-tests] [-h|--help]
 
 目标：
-  all               运行 check、typecheck、test 与 db migration tests（默认）
-  stargate-next     仅运行 stargate-next 包测试
-  playground        仅运行 playground 包测试
-  db                仅运行 @repo/db test:migration
+  all               运行 check、typecheck、test、db migration tests 与全部镜像验证（默认）
+  stargate-next     运行 stargate-next 测试并验证其镜像
+  playground        运行 playground 测试并验证其镜像
+  db                运行 @repo/db migration tests 并验证 db 镜像
   stargate-service  仅运行 @repo/stargate-service 测试
 
 选项：
@@ -46,6 +49,7 @@ usage() {
   -h, --help              显示帮助
 
 说明：
+  - 需要 Docker 与 Buildx；镜像以 stargate-ci-local/<应用>:latest 构建并在 smoke 后删除
   - 仅操作 pnpm workspace 内包；legacy apps/stargate 不在范围内
   - 启动 legacy 服务请使用：pnpm dev:stargate
 EOF
@@ -94,9 +98,36 @@ assert_legacy_outside_workspace() {
   fi
 }
 
+is_docker_app() {
+  local candidate="$1"
+  local app
+
+  for app in "${DOCKER_APPS[@]}"; do
+    if [[ "$app" == "$candidate" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+docker_apps_for_target() {
+  if [[ "$TARGET" == 'all' ]]; then
+    printf '%s\n' "${DOCKER_APPS[@]}"
+    return
+  fi
+
+  if is_docker_app "$TARGET"; then
+    printf '%s\n' "$TARGET"
+  fi
+}
+
 run_check() {
   log_step 'pnpm check'
   pnpm check
+
+  log_step '校验 Docker COPY 输入清单'
+  FINGERPRINT_VERIFY_COPY_INPUTS_ONLY=1 FINGERPRINT_TARGET=all bash scripts/docker-image-fingerprint.sh
 }
 
 run_typecheck() {
@@ -115,11 +146,80 @@ run_migration_tests() {
   pnpm --filter @repo/db test:migration
 }
 
+ensure_ci_build() {
+  if ((BUILT_CI == 1)); then
+    return
+  fi
+
+  log_step 'pnpm build:ci --summarize'
+  NODE_ENV=production BUILD_STANDALONE=true pnpm build:ci --summarize
+  BUILT_CI=1
+}
+
+build_image() {
+  local app="$1"
+  local image_tag="stargate-ci-local/${app}:latest"
+
+  case "$app" in
+    stargate-next | playground)
+      log_step "准备 ${app} 的 Docker runtime artifacts"
+      bash "$REPO_ROOT/scripts/prepare-docker-context.sh" "$app" pnpm
+      ;;
+  esac
+
+  log_step "使用 Docker Bake 构建 ${app} 镜像（不 push）"
+  docker buildx bake \
+    --file "$REPO_ROOT/docker-bake.hcl" \
+    --load \
+    --set "${app}.platform=linux/amd64" \
+    --set "${app}.tags=${image_tag}" \
+    "$app"
+
+  log_step "确认 ${app} 镜像已加载到本地 Docker"
+  docker image inspect "$image_tag" >/dev/null
+
+  log_step "验证 ${app} 的 runtime artifacts"
+  bash "$REPO_ROOT/scripts/verify-docker-runtime.sh" "$app" "$image_tag"
+
+  log_step "清理已验证的 ${app} 本地镜像"
+  docker image rm "$image_tag" >/dev/null
+}
+
+run_docker_validation() {
+  local apps=()
+  local app
+  local needs_build=0
+
+  while IFS= read -r app; do
+    [[ -n "$app" ]] && apps+=("$app")
+  done < <(docker_apps_for_target)
+
+  if ((${#apps[@]} == 0)); then
+    return
+  fi
+
+  for app in "${apps[@]}"; do
+    case "$app" in
+      stargate-next | playground) needs_build=1 ;;
+    esac
+  done
+
+  if ((needs_build == 1)); then
+    ensure_ci_build
+  fi
+
+  for app in "${apps[@]}"; do
+    build_image "$app"
+  done
+}
+
 main() {
   parse_args "$@"
 
   require_command pnpm
   require_command rg
+  require_command docker
+  docker buildx version >/dev/null 2>&1 || fail 'Docker Buildx 不可用'
   cd "$REPO_ROOT"
 
   assert_legacy_outside_workspace
@@ -132,11 +232,20 @@ main() {
       if ((RUN_MIGRATION_TESTS == 1)); then
         run_migration_tests
       fi
+      run_docker_validation
       ;;
     db)
+      run_check
+      run_typecheck
       if ((RUN_MIGRATION_TESTS == 1)); then
         run_migration_tests
       fi
+      run_docker_validation
+      ;;
+    stargate-service)
+      run_check
+      run_typecheck
+      run_tests '@repo/stargate-service'
       ;;
     *)
       if [[ -z "${APP_FILTER[$TARGET]:-}" ]]; then
@@ -146,6 +255,7 @@ main() {
       run_check
       run_typecheck
       run_tests "${APP_FILTER[$TARGET]}"
+      run_docker_validation
       ;;
   esac
 

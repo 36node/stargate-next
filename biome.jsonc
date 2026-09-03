@@ -40,7 +40,8 @@
       "!packages/stargate-next-sdk/src/generated.ts",
       "!packages/stargate-next-sdk/src/openapi.ts",
       // k6 scripts use runtime globals (__ENV/__VU) and k6 modules, not Node/Biome defaults
-      "!apps/stargate-next/load-test"
+      "!apps/stargate-next/load-test",
+      "!**/deploy"
     ]
   },
   "linter": {

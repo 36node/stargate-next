@@ -47,12 +47,10 @@ jobs:
         env:
           NODE_ENV: production
           BUILD_STANDALONE: "true"
-      - name: Prepare DB production runtime
-        run: bash scripts/prepare-db-runtime.sh
-      - name: Prepare Playground production runtime
-        run: bash scripts/prepare-playground-runtime.sh
-      - name: Prepare Stargate Next production runtime
-        run: bash scripts/prepare-stargate-next-runtime.sh
+      - name: Prepare Docker runtime artifacts
+        run: |
+          bash scripts/prepare-docker-context.sh stargate-next pnpm
+          bash scripts/prepare-docker-context.sh playground pnpm
       - uses: docker/setup-buildx-action@v4
         with:
           driver: docker-container

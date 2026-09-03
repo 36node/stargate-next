@@ -5,5 +5,5 @@
     "incremental": true,
     "target": "ES2023"
   },
-  "exclude": ["dist", "load-test", "node_modules", "vitest.config.ts"]
+  "exclude": ["deploy", "dist", "load-test", "node_modules", "vitest.config.ts"]
 }
