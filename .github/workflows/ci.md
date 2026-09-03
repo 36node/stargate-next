@@ -19,7 +19,10 @@ CI 工作流会先验证 workspace 格式与边界，再运行测试与构建；
 
 `check` 与 `test-and-build` 并行运行；格式或 workspace 边界检查失败时，`deploy` 不会执行。
 
-CI runner（`arc-runners-mekong`）需预装 Node.js 24 与 pnpm `11.24.0`（由 `packageManager` 字段固定版本）。Runner 在容器级别提供 `NPM_CONFIG_REGISTRY` 与 `pnpm_config_registry`，依赖安装统一通过内网 Verdaccio；`NODE_AUTH_TOKEN` 仅用于 GitHub Packages。
+CI runner（`arc-runners-mekong`）需预装 pnpm `11.24.0`（由 `packageManager` 字段固定版本）。Runner 在容器级别提供 `NPM_CONFIG_REGISTRY` 与 `pnpm_config_registry`，依赖安装统一通过内网 Verdaccio；`NODE_AUTH_TOKEN` 仅用于 GitHub Packages。
+workflow 级别变量 `NODE_DIST_MIRROR` 指向 Node.js 分发代理缓存。各 job 使用仓库内的 `.github/actions/setup-node-mirror`，直接从 `${NODE_DIST_MIRROR}/dist/v<version>/` 下载并校验 Node.js，不经过 `actions/node-versions` 的 GitHub Release 下载地址。该地址是镜像根地址，不要附加 `/dist`；不配置 `mirror-token`。mirror 不可用时不会自动回退公网。
+
+`check`、`test-and-build` 与 `deploy` job 会安装 Node.js `24.20.0`；`release` 与 `load-test` 工作流中的 Node 相关 job 同样使用该 mirror。
 
 ## legacy `apps/stargate`
 

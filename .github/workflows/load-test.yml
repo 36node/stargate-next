@@ -17,6 +17,9 @@ concurrency:
   group: load-test-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_DIST_MIRROR: http://node-dist-cache.arc-runners.svc.cluster.local:8080
+
 permissions:
   contents: read
 
@@ -70,6 +73,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+
+      - name: Install Node.js
+        uses: ./.github/actions/setup-node-mirror
+        with:
+          node-version: 24.20.0
+          mirror: ${{ env.NODE_DIST_MIRROR }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
