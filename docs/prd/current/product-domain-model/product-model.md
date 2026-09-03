@@ -39,13 +39,13 @@ Stargate Next 通过“身份认证与业务授权分离”解决这些问题。
 
 ### 4.1 终端用户
 
-使用 `bus-admin-web` 的人员。核心诉求是稳定登录、刷新会话、退出，并按最新业务权限访问功能和数据。
+使用 `bus-admin-web` 的人员。核心诉求是稳定登录、刷新会话、退出、自行修改当前账户密码，并按最新业务权限访问功能和数据。
 
 ### 4.2 业务管理员
 
 在 Mekong 中管理用户、组织、角色和权限。核心诉求包括：
 
-- 创建、禁用、删除用户和修改密码。
+- 创建、禁用、删除用户和执行管理员密码重置。
 - 管理组织树及用户归属。
 - 调整角色或直接权限并立即生效。
 - 查看账户状态并撤销用户 Session。
@@ -91,7 +91,7 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 - 登录标识：username、登录用途的 phone/email。
 - 当前密码凭证。
 - Session 与 Refresh Key 哈希。
-- Captcha、登录失败限制等短期认证状态。
+- Captcha、登录失败限制和用户自改密码失败限制等短期认证状态。
 - 最小认证审计。
 
 登录标识规则（唯一性均以 Tenant 为边界）：
@@ -105,7 +105,7 @@ MVP 调用方为 `bus-admin-web`。它消费 Stargate Next 的身份能力，并
 - 最小 User Profile；当前确认至少包含 `name`。
 - Organization 和用户主组织归属。
 - Role、RoleToPermissions、直接 Permission 和数据范围。
-- 创建、禁用、改密、删除用户时的业务编排。
+- 创建、禁用、管理员重置密码、删除用户时的业务编排。
 
 登录 phone/email 与业务联系方式语义独立。若同一个值同时承担两种用途，调用方必须显式更新两侧，任何一侧都不是另一侧的隐式副本。
 
@@ -145,18 +145,28 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 - Session 被删除、过期，或 Account 被禁用、删除后，不得继续 Refresh。
 - 已签发 Access Token 可使用至自身过期，不执行逐请求 Session introspection。
 
-### 7.3 管理账户
+### 7.3 用户自行修改密码
+
+1. 已登录用户提交当前密码与新密码，业务应用使用 Access Token 调用用户自改密码接口。
+2. Stargate Next 从 Token 的 `tid`、`sub`、`sid` 确定 Tenant、Account 与当前 Session，不接受调用方指定其他 Account。
+3. 服务确认 Account 可认证、未处于自改密码锁定期，并验证当前密码与新密码合法且不同。
+4. 修改成功后保留当前 Session，撤销该 Account 的其他 Session；旧密码不可再登录，新密码立即生效。
+5. 当前密码错误时不修改密码或 Session，并按 Tenant 内的 Account 累计独立失败次数；达到阈值后短期拒绝后续自改尝试。
+
+管理员重置密码仍使用 Account 管理接口，不要求当前密码，并撤销目标 Account 的全部 Session。
+
+### 7.4 管理账户
 
 业务管理员可通过业务编排完成：
 
 - 创建 Account，再创建 Mekong Profile 和授权数据。
 - 查询或批量查询 Account 状态。
 - 修改 username、登录 phone/email 或 active 状态。
-- 通过专用接口修改密码；改密后撤销该账户全部 Session。
+- 通过管理员专用接口重置密码；重置后撤销该账户全部 Session。
 - 禁用 Account 并撤销全部 Session。
 - 删除业务 Profile 后软删除 Account；操作支持重试并保持幂等。
 
-### 7.4 调整业务授权
+### 7.5 调整业务授权
 
 管理员只在 Mekong 修改组织、角色或直接权限。下一次业务请求重新加载授权上下文后立即生效，不修改 Stargate Next 数据，也不重新签发 JWT。
 
@@ -168,7 +178,7 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 
 - Tenant 创建、查询、分页与状态/名称更新，以及 Tenant API Key 生命周期管理。
 - Account 创建、分页查询、单个查询、批量查询、更新、软删除。
-- 密码设置与修改。
+- 密码设置、管理员重置与已登录用户自改；自改失败次数和锁定策略与登录限制独立。
 - Captcha 创建、验证、过期、一次性消费、错误次数和创建频率限制。
 - 登录、Refresh、Logout。
 - Session 查询、单个撤销和账户级批量撤销。
@@ -187,6 +197,7 @@ Playground 验收：
 - 展示 slim Session、JWT claims 和模拟授权上下文。
 - 验证受保护页面或操作。
 - 验证权限变更无需重新签发 JWT。
+- 使用登录态中的 Access Token 验证用户自改密码，无需手工粘贴 Token。
 
 ### 8.2 Phase B：真实 Mekong 集成
 
@@ -195,7 +206,7 @@ Playground 验收：
 - 将 Mekong 的 Auth client 收缩为身份能力客户端。
 - 将 Session 处理收缩为 slim Session。
 - 将旧 Auth 的 User、Namespace、Role、Permission 调用迁移到 Mekong。
-- 完成用户创建、禁用、改密和删除的跨服务编排。
+- 完成用户创建、禁用、管理员重置密码和删除的跨服务编排。
 
 ### 8.3 Phase C：迁移与上线
 
@@ -216,6 +227,7 @@ Playground 验收：
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
 - `POST /v1/auth/logout`
+- `POST /v1/auth/password`
 - `GET /v1/accounts`
 - `POST /v1/accounts`
 - `GET /v1/accounts/{accountId}`
@@ -233,6 +245,15 @@ Playground 验收：
 - `GET /v1/tenant-api-keys`
 - `PATCH /v1/tenant-api-keys/{keyId}`
 - `DELETE /v1/tenant-api-keys/{keyId}`
+
+两类改密契约保持独立：
+
+| 操作 | 接口 | 鉴权 | 请求体 | Session 影响 |
+| --- | --- | --- | --- | --- |
+| 管理员重置 | `POST /v1/accounts/{accountId}/password` | Admin、Service 或 Tenant API Key，并受 Tenant 边界约束 | `{ password }` | 撤销目标 Account 的全部 Session |
+| 用户自改 | `POST /v1/auth/password` | Bearer Access Token | `{ currentPassword, newPassword }` | 保留 Token `sid` 对应的当前 Session，撤销该 Account 的其他 Session |
+
+用户自改成功返回 `204` 且无响应体；当前密码错误、密码非法、自改锁定和认证失败均使用稳定且不泄露凭证信息的错误语义。管理员重置不受用户自改失败计数影响。
 
 内部管理接口的三类凭证职责如下：
 
@@ -261,6 +282,8 @@ JWT 不得包含 `ns`、`roles`、`permissions` 或 `groups`。
 - 不覆盖 Haivivi、Adventurer 等其他项目。
 - 不迁移旧 Session、Captcha、Group、Role collection 或未确认使用的 Namespace 扩展字段。
 - 不提供通用短信、邮件、字典、报表或数据清理能力。
+- 不提供未登录密码找回或通过邮箱、手机验证码重置密码。
+- 不在本期升级密码强度或密码哈希策略，也不把用户自改密码并入 Account `PATCH`。
 - 不在 MVP 实现 Refresh rotation/reuse detection。
 - 不在 MVP 实现 RS256、JWKS、OIDC Provider、Client Credential、OAuth/Federation、OTP 登录、KYC 或设备凭证。
 - 不把 Playground mock 数据建设成生产业务服务。
@@ -269,10 +292,11 @@ JWT 不得包含 `ns`、`roles`、`permissions` 或 `groups`。
 
 ### 11.1 身份认证
 
-- Account 的规范化、唯一性、状态、改密和软删除行为符合契约。
+- Account 的规范化、唯一性、状态、管理员重置、用户自改密码和软删除行为符合契约。
 - 正确密码、错误密码、禁用和删除账户场景均得到稳定结果。
 - Captcha 具备 TTL、一次性消费、错误次数与频率限制。
-- Login、Refresh、Logout 和 Session revoke 可通过真实 PostgreSQL、Redis 和运行中服务完成黑盒验收。
+- Login、Refresh、Logout、用户自改密码和 Session revoke 可通过真实 PostgreSQL、Redis 和运行中服务完成黑盒验收。
+- 用户自改成功后当前 Session 可继续 Refresh、其他 Session 失效；失败或锁定时密码与全部 Session 均保持不变。
 - API、SDK、日志和审计不泄露密码、Captcha、Token 或内部 hash。
 
 ### 11.2 身份与授权分离

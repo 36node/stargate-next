@@ -49,6 +49,8 @@
 | Captcha | 登录前的人机验证挑战。 | 短期、一次性、有尝试次数限制。 |
 | Login Failure Counter | 按 Tenant 与规范化 login 记录的短期失败次数。 | Captcha 失败和凭证失败都计入，但不得跨 Tenant 累加。 |
 | Login Lock | 失败次数达到阈值后对该 login 的临时阻断。 | 不是 Account Status，不永久修改 Account。 |
+| Password Change Failure Counter | 按 Tenant 与 Account 记录用户自改密码时当前密码错误的短期失败次数。 | 与 Login Failure Counter 使用独立配置和计数键，不影响管理员重置密码。 |
+| Password Change Lock | 用户自改密码失败达到阈值后对该 Account 的临时阻断。 | 不改变 Account Status、密码或任何 Session。 |
 | Auth Audit Event | 对认证和账户安全操作的不可变事实记录。 | 不是可编辑业务日志，不保存秘密。 |
 | Request Context | 请求 ID、IP、User-Agent 等审计上下文。 | 不参与领域身份判断。 |
 | Admin API Key | 平台控制面信任根，可管理 Tenant，并在数据面选择一个 Tenant 代操作。 | 不映射为人员 Account、Session 或业务权限。 |
@@ -65,6 +67,13 @@
 - `TENANT_NOT_FOUND`：Admin 控制面按路径查询的 Tenant 不存在。
 - `TENANT_API_KEY_NOT_FOUND`：当前 Tenant 内不存在目标 API Key。
 - `TENANT_API_KEY_SELF_DELETE`：Tenant API Key 尝试删除自身。
+
+用户自改密码使用以下稳定错误码：
+
+- `CURRENT_PASSWORD_INVALID`：提交的当前密码与 Account 的现有凭证不匹配。
+- `PASSWORD_INVALID`：当前密码或新密码缺失、为空、格式非法，或新密码与当前密码相同。
+- `PASSWORD_CHANGE_LOCKED`：该 Tenant 内的 Account 已达到自改失败阈值且仍在锁定期。
+- `ACCESS_TOKEN_INVALID`：缺少有效 Bearer Access Token，或 Token 不能建立合法 Principal。
 
 ### 2.4 Mekong 业务身份与授权
 
@@ -164,6 +173,7 @@ MVP 的 `PasswordCredential` 由以下值组成：
 
 - 明文密码只在命令执行期间存在，不持久化、不记录日志或审计。
 - 每次创建 Account 或改密都生成新的 13 位随机 salt。
+- 创建 Account、管理员重置和用户自改使用相同的新密码合法性规则；用户自改的新密码不得与已验证的当前密码相同。
 - 不识别的 algorithm 必须显式拒绝，不能尝试降级验证。
 - 凭证属于 Account 认证边界，不单独成为可公开查询的实体。
 - `legacy-md5` 只用于 MVP 兼容，不代表目标安全算法。
@@ -238,7 +248,7 @@ Account 负责维持以下不变量：
 - 始终拥有合法且在 Tenant 内唯一的 username。
 - phone/email 存在时必须合法且在 Tenant 内唯一。
 - 只有 active 且未删除的 Account 可以登录或 Refresh。
-- 密码只能通过专用改密行为更新。
+- 密码只能通过管理员重置或已认证用户自改的专用行为更新，普通 Account patch 不接受密码。
 - 对外表示不得包含 PasswordCredential。
 - 软删除后不再参与普通查询、登录或 Refresh。
 
@@ -311,7 +321,7 @@ AuthAuditEvent 是不可变、仅追加的安全事实实体。
 - 登录成功或失败。
 - Refresh 与 Logout。
 - Account 创建、更新、禁用和删除。
-- 密码修改。
+- 管理员重置密码与用户自改密码，并使用不同事件语义；用户自改的 actor 为该 Account。
 - Session 撤销。
 - Tenant 创建、启用、停用，以及 Tenant API Key 创建、删除。
 
@@ -353,10 +363,11 @@ Playground 中的同名对象是测试替身，只用于验证契约和场景，
 - ChangeLoginIdentifiers。
 - ActivateAccount。
 - DisableAccount。
-- ChangePassword。
+- ResetPasswordByAdministrator。
+- ChangeOwnPassword。
 - SoftDeleteAccount。
 
-Account 聚合内的字段修改应在单一数据库事务中保持一致。改密、删除等同时撤销 Session 的用例需要应用服务协调 Account 与 Session repository，并在 Stargate Next 数据库事务中完成。
+Account 聚合内的字段修改应在单一数据库事务中保持一致。管理员重置、用户自改成功、删除等同时撤销 Session 的用例需要应用服务协调 Account 与 Session repository，并在 Stargate Next 数据库事务中完成；自改失败不得产生凭证或 Session 变更。
 
 Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant；Tenant disabled 不删除 Account、Session、Key 或历史审计。Tenant 名称更新不改变路由，`default` Tenant 不允许改名。
 
@@ -372,12 +383,15 @@ Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant
 - ValidateRefresh。
 - RevokeSession。
 - RevokeAllSessionsForAccount。
+- RevokeOtherSessionsForAccount。
 
 跨聚合规则：
 
 - 创建 Session 前必须确认 Account active 且未删除。
 - Refresh 时必须同时确认 Session 未过期且 Account 仍可认证。
-- 改密和删除 Account 必须撤销其全部 Session。
+- 管理员重置密码和删除 Account 必须撤销其全部 Session。
+- 用户自改密码成功后只撤销同一 Account 除 Principal `sessionId` 以外的 Session；当前 Session 保留。
+- 用户自改失败或处于锁定期时不得撤销任何 Session。
 - 禁用 Account 后即使 Session 尚未删除，也必须立即拒绝 Refresh；业务禁用流程还应显式批量撤销 Session。
 
 ### 5.3 Captcha 聚合
@@ -386,7 +400,7 @@ Tenant 是独立聚合根。Tenant API Key 是独立凭证实体并引用 Tenant
 
 Captcha 的创建、尝试计数和消费必须以 Redis 原子操作维持一致性，避免同一个挑战被并发成功消费两次。
 
-Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状态，不是 CaptchaChallenge 的属性。
+Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure Counter 是相互独立的短期策略状态，不是 CaptchaChallenge 的属性。
 
 ### 5.4 Audit 聚合
 
@@ -442,7 +456,24 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 - 登录成功后清除计数。
 - Redis 不可用时不能静默跳过限制，服务 readiness 应失败。
 
-### 6.4 Token Issuance Policy
+### 6.4 Self Password Change Service and Throttling Policy
+
+用户自改密码由认证上下文内的应用服务编排：
+
+1. 验证 Bearer Access Token，并从 Principal 的 `tenantId`、`accountId`、`sessionId` 确定 Tenant、Account 与当前 Session；请求路径和 body 不接受 `accountId`。
+2. 校验 `currentPassword` 与 `newPassword` 均存在、非空且类型合法，并拒绝两者相同；非法时返回 `PASSWORD_INVALID`，且不增加当前密码失败次数。
+3. 在 Token `tid` 对应 Tenant 内加载 `sub` 对应的 Account，并确认其 active 且未删除。
+4. 按 `(tenantId, accountId)` 检查 Password Change Lock；锁定期间即使当前密码正确也拒绝操作。
+5. 校验 `currentPassword`。错误时返回 `CURRENT_PASSWORD_INVALID`，增加该 Account 的 Password Change Failure Counter，不更新 PasswordCredential，也不撤销 Session。
+6. 校验 `newPassword` 符合创建 Account 与管理员重置共用的规则；非法时返回 `PASSWORD_INVALID`，不更新密码或 Session。
+7. 更新 PasswordCredential，并撤销该 Account 除 Principal `sessionId` 对应 Session 以外的全部 Session；当前 Session 保持可 Refresh。
+8. 清除 Password Change Failure Counter，记录与管理员重置不同的 `password.self_change` 审计事件，actor 为该 Account。
+
+Password Change Failure Counter 和 Lock 使用独立于登录限制的阈值与锁定期配置。达到阈值后返回 `PASSWORD_CHANGE_LOCKED`；锁定期间密码与全部 Session 均不变。锁定期自然结束后清除旧计数并允许重新尝试，成功后同样清除计数。管理员重置密码不读取或增加该计数。
+
+已签发的 Access Token 不因密码更新做逐请求撤销，仍可使用至自身过期；只有被删除 Session 的 Refresh Key 失效。
+
+### 6.5 Token Issuance Policy
 
 - MVP 使用 HS256 签发 Access Token。
 - Token TTL 由服务配置决定。
@@ -450,7 +481,7 @@ Captcha 创建频率限制与 Login Failure Counter 是独立的短期策略状�
 - 签发 Token 不复制任何 Mekong 授权数据。
 - Logout、Revoke、Disable 或 Delete 不追溯修改已签发 Token；资源服务仍以 Token 的 `exp` 为边界。
 
-### 6.5 Access Token Validation Policy
+### 6.6 Access Token Validation Policy
 
 只有同时满足以下条件的 Access Token 才能建立 Principal：
 
@@ -475,7 +506,7 @@ MVP 的默认时钟容差为 30 秒，签发方与验证方必须使用相同配
 
 任何格式、header、签名或 claims 校验失败，对外统一返回 `ACCESS_TOKEN_INVALID`，不得通过错误响应泄露具体失败步骤。内部可记录不含 Token 内容的失败分类和请求上下文。
 
-### 6.6 Authorization Context Calculation
+### 6.7 Authorization Context Calculation
 
 该领域服务属于 Mekong：
 
@@ -488,7 +519,7 @@ MVP 的默认时钟容差为 30 秒，签发方与验证方必须使用相同配
 
 Authorization Context 是派生结果，不写入 JWT。组织或授权关系变化后，后续请求重新计算即可生效。
 
-### 6.7 Account Lifecycle Orchestration
+### 6.8 Account Lifecycle Orchestration
 
 该流程由 Mekong 作为业务编排方发起，但分别写入各自领域。
 
@@ -500,9 +531,11 @@ Authorization Context 是派生结果，不写入 JWT。组织或授权关系变
 
 更新业务用户：
 
-- username、登录 phone/email、active 和 password 写入 Stargate Next。
+- username、登录 phone/email、active 和管理员密码重置写入 Stargate Next。
 - name、业务联系方式、Organization、Role 和 Permission 写入 Mekong。
 - 同一命令涉及两侧时必须显式编排，不隐式双写。
+
+用户自行修改密码由持有 Access Token 的业务应用直接调用 Stargate Next，不经过 Mekong 用户生命周期编排。
 
 删除业务用户：
 
@@ -553,7 +586,8 @@ stateDiagram-v2
 
 - Session 创建后在 `expiresAt` 前有效。
 - Refresh 不产生状态转换，也不改变 `updatedAt` 或 `expiresAt`。
-- Logout、单 Session revoke、账户级 revoke、改密和删除 Account 都通过删除终止 Session。
+- Logout、单 Session revoke、账户级 revoke、管理员重置密码和删除 Account 都通过删除终止对应 Session。
+- 用户自改密码成功时，当前 `sid` 对应 Session 保持 Valid，同一 Account 的其他 Session 通过删除终止。
 - 对不存在的 Session 执行 revoke 仍视为成功。
 
 ### 7.3 Captcha 生命周期
@@ -577,12 +611,13 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 
 - 有效 Account 必须有且仅有一个 username。
 - 规范化后的 username、phone、email 分别在 Tenant 内唯一。
-- Account、Session、Captcha、Login Lock、Idempotency Key 与 AuthAuditEvent 均属于一个 Tenant；任何读取和写入都必须携带 Tenant 过滤。
+- Account、Session、Captcha、Login Lock、Password Change Failure Counter / Lock、Idempotency Key 与 AuthAuditEvent 均属于一个 Tenant；任何读取和写入都必须携带 Tenant 过滤。
 - 同一登录标识可在不同 Tenant 各自存在，不能通过全局 Account/Session ID 绕过 Tenant 边界。
 - 对 LoginIdentifier 的读取与写入必须使用相同规范化算法。
 - Account ID 创建后不可变。
 - 普通 Account patch 不接受 password。
 - disabled 或 deleted Account 不能 Login 或 Refresh。
+- disabled 或 deleted Account 不能自行修改密码；用户自改只能作用于 Access Token `sub` 对应的 Account。
 - 删除 Account 必须释放其登录标识并撤销全部 Session。
 
 ### 8.2 Session 与 Token
@@ -604,6 +639,7 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - Captcha 只能成功消费一次。
 - Captcha 创建按 Tenant 与客户端 IP 限流。
 - 登录失败按 Tenant 与规范化 login 限流。
+- 用户自改密码的当前密码失败按 Tenant 与 Account 限流，且不与登录失败共享配置或计数。
 - Captcha 与 JWT、Refresh Key 不得复用 HMAC/signing secret。
 - 固定测试 code 只在显式启用的非生产隔离环境生效；不得绕过 CaptchaChallenge 的其他安全规则。
 
@@ -623,7 +659,8 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - `AccountIdentifiersChanged`
 - `AccountActivated`
 - `AccountDisabled`
-- `PasswordChanged`
+- `PasswordResetByAdministrator`
+- `PasswordSelfChanged`
 - `AccountDeleted`
 - `AuthenticationSucceeded`
 - `AuthenticationFailed`
@@ -647,6 +684,7 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - 不把 UserProfile 字段加入 Account。
 - 不把 Refresh Key 称为 Refresh Token 后假设其为 JWT。
 - 不把 API Key 映射为人员 Session。
+- 不通过 API Key 调用用户自改密码语义，也不把用户自改并入管理员重置接口。
 - 不把软删除等同于数据库物理删除。
 - 不把 Playground mock 当作 Mekong 数据副本或迁移来源。
 - 不把 AuthAuditEvent 当作可驱动跨服务一致性的消息。
