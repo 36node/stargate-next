@@ -36,11 +36,11 @@
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
     "@repo/vitest-config": "workspace:*",
-    "@types/node": "24.10.1",
+    "@types/node": "catalog:toolchain",
     "@types/pg": "^8.18.0",
     "prisma": "7.9.1",
     "tsx": "catalog:toolchain",
     "typescript": "catalog:toolchain",
-    "vitest": "^4.1.9"
+    "vitest": "catalog:toolchain"
   }
 }

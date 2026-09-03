@@ -43,8 +43,8 @@
     "@repo/vitest-config": "workspace:*",
     "@types/express": "^5.0.3",
     "@types/k6": "^2.0.1",
-    "@types/node": "^24.10.1",
+    "@types/node": "catalog:toolchain",
     "typescript": "catalog:toolchain",
-    "vitest": "^4.1.9"
+    "vitest": "catalog:toolchain"
   }
 }

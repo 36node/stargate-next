@@ -14,9 +14,9 @@
     }
   },
   "peerDependencies": {
-    "vitest": "^4.1.9"
+    "vitest": "catalog:toolchain"
   },
   "devDependencies": {
-    "vitest": "^4.1.9"
+    "vitest": "catalog:toolchain"
   }
 }
