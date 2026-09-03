@@ -4,6 +4,10 @@ packages:
   - "packages/*"
   - "packages/services/*"
 
+# 限制 pnpm 11 的 registry 请求并发，保持与 pnpm 10 接近，避免压垮 Verdaccio。
+networkConcurrency: 16
+trustLockfile: true
+
 catalogs:
   toolchain:
     "@types/node": ^24
@@ -21,3 +25,17 @@ packageExtensions:
   "@hookform/resolvers@^5":
     peerDependencies:
       zod: ^4.4.3
+
+overrides:
+  "@nestjs/cli>typescript": "catalog:toolchain"
+  parse5: ^7.2.1
+  webpack: ^5.108.3
+
+allowBuilds:
+  "@repo/db@file:packages/db": true
+  "@prisma/engines": true
+  bufferutil: true
+  core-js-pure: true
+  esbuild: true
+  prisma: true
+  sharp: true

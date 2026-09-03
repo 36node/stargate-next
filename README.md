@@ -16,7 +16,7 @@ Stargate Next 是一个基于 pnpm 与 Turborepo 的 Monorepo，用于承载下�
 
 ## 前置条件
 
-需要 Node.js `>=24 <25`、pnpm 10 与 Docker：
+需要 Node.js `>=24 <25`、pnpm `>=11 <12`（仓库冻结版本 `11.24.0`）与 Docker：
 
 ```bash
 nvm use 24
