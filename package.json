@@ -9,6 +9,7 @@
     "check": "ultracite check",
     "fix": "ultracite fix",
     "test": "turbo test",
+    "test:registry-config": "bash scripts/resolve-image-registry.test.sh",
     "typecheck": "turbo typecheck",
     "analyze": "turbo analyze",
     "translate": "turbo translate",

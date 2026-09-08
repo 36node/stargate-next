@@ -4,6 +4,10 @@
 .env.*
 node_modules
 **/node_modules
+.pnpm-store
+**/.pnpm-store
+.turbo
+**/.turbo
 **/.next
 **/dist
 coverage

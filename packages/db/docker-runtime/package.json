@@ -1,0 +1,11 @@
+{
+  "name": "stargate-db-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "dotenv": "16.6.1",
+    "prisma": "7.9.1",
+    "tsx": "4.23.13"
+  }
+}

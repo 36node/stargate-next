@@ -6,17 +6,33 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
-  HARBOR_DOMAIN: harbor.36node.com
-  HARBOR_PROJECT: stargate
-  NODE_DIST_MIRROR: http://node-dist-cache.arc-runners.svc.cluster.local:8080
+  IMAGE_REGISTRY_PROVIDER: ${{ vars.IMAGE_REGISTRY_PROVIDER || 'harbor' }}
 
 jobs:
+  registry-config:
+    runs-on: ubuntu-latest
+    outputs:
+      registry: ${{ steps.registry.outputs.registry }}
+      stargate_next_image: ${{ steps.registry.outputs.stargate_next_image }}
+      playground_image: ${{ steps.registry.outputs.playground_image }}
+      db_image: ${{ steps.registry.outputs.db_image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Resolve image registry
+        id: registry
+        run: bash scripts/resolve-image-registry.sh
+
   release-please:
-    runs-on: arc-runners-mekong
+    needs: registry-config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       stargate_next_released: ${{ steps.release.outputs['apps/stargate-next--release_created'] }}
@@ -33,19 +49,23 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   docker:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
-    runs-on: arc-runners-mekong
+    needs: [registry-config, release-please]
+    if: ${{ needs['release-please'].outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
       - name: Install Node.js
-        uses: ./.github/actions/setup-node-mirror
+        uses: actions/setup-node@v6
         with:
           node-version: 24.20.0
-          mirror: ${{ env.NODE_DIST_MIRROR }}
+          cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build
@@ -62,24 +82,27 @@ jobs:
           driver: docker-container
       - uses: docker/login-action@v4
         with:
-          registry: ${{ env.HARBOR_DOMAIN }}
+          registry: ${{ needs['registry-config'].outputs.registry }}
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWORD }}
       - name: Plan release images
         id: image-plan
         env:
-          STARGATE_NEXT_RELEASED: ${{ needs.release-please.outputs.stargate_next_released }}
-          STARGATE_NEXT_TAG: ${{ needs.release-please.outputs.stargate_next_tag }}
-          PLAYGROUND_RELEASED: ${{ needs.release-please.outputs.playground_released }}
-          PLAYGROUND_TAG: ${{ needs.release-please.outputs.playground_tag }}
-          DB_RELEASED: ${{ needs.release-please.outputs.db_released }}
-          DB_TAG: ${{ needs.release-please.outputs.db_tag }}
+          STARGATE_NEXT_RELEASED: ${{ needs['release-please'].outputs.stargate_next_released }}
+          STARGATE_NEXT_TAG: ${{ needs['release-please'].outputs.stargate_next_tag }}
+          PLAYGROUND_RELEASED: ${{ needs['release-please'].outputs.playground_released }}
+          PLAYGROUND_TAG: ${{ needs['release-please'].outputs.playground_tag }}
+          DB_RELEASED: ${{ needs['release-please'].outputs.db_released }}
+          DB_TAG: ${{ needs['release-please'].outputs.db_tag }}
+          STARGATE_NEXT_IMAGE: ${{ needs['registry-config'].outputs.stargate_next_image }}
+          PLAYGROUND_IMAGE: ${{ needs['registry-config'].outputs.playground_image }}
+          DB_IMAGE: ${{ needs['registry-config'].outputs.db_image }}
         run: |
           set -euo pipefail
           targets=()
           plan_image() {
             local target="$1"
-            local image_target="$2"
+            local image="$2"
             local component="$3"
             local released="$4"
             local tag="$5"
@@ -87,7 +110,6 @@ jobs:
             [ "$released" = "true" ] || return 0
             version="${tag#"${component}-v"}"
             test "$version" != "$tag"
-            image="${HARBOR_DOMAIN}/${HARBOR_PROJECT}/${image_target}"
             {
               echo "${output}<<EOF"
               echo "${image}:${version}"
@@ -96,9 +118,9 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             targets+=("$target")
           }
-          plan_image "stargate-next" "stargate-next" "stargate-next" "$STARGATE_NEXT_RELEASED" "$STARGATE_NEXT_TAG" "stargate_next_tags"
-          plan_image "playground" "playground" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
-          plan_image "db" "db" "db" "$DB_RELEASED" "$DB_TAG" "db_tags"
+          plan_image "stargate-next" "$STARGATE_NEXT_IMAGE" "stargate-next" "$STARGATE_NEXT_RELEASED" "$STARGATE_NEXT_TAG" "stargate_next_tags"
+          plan_image "playground" "$PLAYGROUND_IMAGE" "playground" "$PLAYGROUND_RELEASED" "$PLAYGROUND_TAG" "playground_tags"
+          plan_image "db" "$DB_IMAGE" "db" "$DB_RELEASED" "$DB_TAG" "db_tags"
           echo "bake_targets=$(IFS=,; echo "${targets[*]}")" >> "$GITHUB_OUTPUT"
       - name: Build and push release images
         if: steps.image-plan.outputs.bake_targets != ''

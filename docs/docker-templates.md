@@ -31,10 +31,10 @@
 
 ### DB toolkit
 
-- 不属于 Nest / Next 的 runner-deploy 模板。使用 `harbor.36node.com/36node/prisma-tools:latest` 提供 Prisma CLI。
-- Bake context 为仓库根；Dockerfile 只复制 `packages/db` 的 prisma schema、`prisma.config.ts`、`package.json` 和 `studio-proxy.ts`。
-- 不在镜像内对 monorepo `package.json` 执行 install（含 `workspace:*`）。构建阶段预拉取 `tsx`，默认入口为 `npx tsx@4.19.0 studio-proxy.ts`。
-- Helm migration Job 使用 `npx prisma migrate deploy`（Prisma CLI 在 toolkit 镜像中，不依赖 `sh` 或本地 `node_modules/.bin`）。
+- 不属于 Nest / Next 的 runner-deploy 模板，直接基于官方 Node Alpine 镜像构建。
+- Bake context 为仓库根；Dockerfile 复制独立的 `packages/db/docker-runtime` manifest/lockfile，并在构建期安装 Prisma、tsx 与 dotenv。
+- 不对 monorepo `package.json` 执行 install（含 `workspace:*`）；容器运行时不访问 npm registry。
+- 默认入口为 `tsx studio-proxy.ts`，Helm migration Job 直接执行 `prisma migrate deploy`。
 
 Nest / Next 产物准备入口：
 
@@ -47,18 +47,18 @@ bash scripts/prepare-docker-context.sh <stargate-next|playground> pnpm
 Nest 与 Next 应用统一使用：
 
 ```text
-harbor.36node.com/common/node:24-alpine3.23
+node:24-alpine3.23
 ```
 
-DB toolkit 使用已登记变体 `prisma-tools`。
+DB toolkit 同样使用 `node:24-alpine3.23`；legacy Stargate 保持 `node:22-alpine3.21`。
 
 ## 已登记变体
 
-| 变体              | 位置                            | 原因                                               |
-| ----------------- | ------------------------------- | -------------------------------------------------- |
-| Nest HEALTHCHECK  | `apps/stargate-next/Dockerfile` | 生产 readiness 探针 `/health/ready`                |
-| Nest Prisma copy  | `scripts/prepare-docker-context.sh` | deploy 后补全 `.prisma` 客户端生成物           |
-| DB prisma-tools   | `packages/db/Dockerfile`        | Prisma CLI 来自 toolkit 基础镜像，不走 pnpm deploy |
+| 变体             | 位置                                | 原因                                      |
+| ---------------- | ----------------------------------- | ----------------------------------------- |
+| Nest HEALTHCHECK | `apps/stargate-next/Dockerfile`     | 生产 readiness 探针 `/health/ready`       |
+| Nest Prisma copy | `scripts/prepare-docker-context.sh` | deploy 后补全 `.prisma` 客户端生成物      |
+| DB runtime lock  | `packages/db/docker-runtime`        | 独立锁定 migration/Studio 所需的 CLI 依赖 |
 
 ## 新增同类应用
 
@@ -75,7 +75,7 @@ DB toolkit 使用已登记变体 `prisma-tools`。
 - 同类 Dockerfile 是否只保留允许差异和已登记变体；
 - Nest / Next 的基础镜像 tag 是否仍然统一；
 - Nest / Next 的 install、build 和 `pnpm deploy` 是否都在 runner 上完成；
-- DB toolkit 是否仍使用 `prisma-tools`，且未把 monorepo install 放进镜像；
+- DB toolkit 是否仍使用独立 runtime lock，且未把 monorepo install 放进镜像；
 - 每个 target 的 fingerprint COPY 输入数组是否与 Dockerfile 完全一致；
 - Helm 的 `command`、`args` 与镜像 `ENTRYPOINT`、`CMD` 组合语义是否仍然成立。
 

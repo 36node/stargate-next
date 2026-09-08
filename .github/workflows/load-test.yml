@@ -17,16 +17,13 @@ concurrency:
   group: load-test-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  NODE_DIST_MIRROR: http://node-dist-cache.arc-runners.svc.cluster.local:8080
-
 permissions:
   contents: read
 
 jobs:
   load-test:
     name: Stargate Next k6 load test
-    runs-on: arc-runners-mekong
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
       postgres:
@@ -74,11 +71,16 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
       - name: Install Node.js
-        uses: ./.github/actions/setup-node-mirror
+        uses: actions/setup-node@v6
         with:
           node-version: 24.20.0
-          mirror: ${{ env.NODE_DIST_MIRROR }}
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -147,6 +147,10 @@ pnpm dev
 
 使用 `pnpm build`、`pnpm typecheck` 和 `pnpm test` 验证 workspace。
 
+GitHub Actions 使用 `ubuntu-latest`、Node.js `24.20.0` 与 pnpm `11.24.0`。应用镜像基于 Docker Hub 官方 Node Alpine 镜像构建，发布目标仍为 Harbor。Repository Variable `IMAGE_REGISTRY_PROVIDER` 当前仅接受 `harbor`，未配置时默认使用 Harbor；其他值会在发布前直接失败。fork PR 会完成测试、应用构建和本地 Docker smoke，但不会读取发布 Secrets、推送镜像或调用 Cyclops。
+
+仓库目前未提供开源许可证；上述改造只完成公开源码所需的技术准备，不代表项目已经完成开源发布。
+
 架构与迁移计划见
 [`docs/rewrite-with-mekong.md`](docs/rewrite-with-mekong.md) 和
 [`docs/rewrite.md`](docs/rewrite.md)。

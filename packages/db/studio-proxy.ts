@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 
-// 本地 pnpm studio：从 node_modules 加载 .env；Docker/K8s 无 dotenv 包时跳过。
+// 从 node_modules 加载 .env；编排环境未提供文件时继续使用注入的环境变量。
 try {
   createRequire(import.meta.url)("dotenv/config");
 } catch {

@@ -1,4 +1,4 @@
-FROM harbor.36node.com/common/node:24-alpine3.23 AS runner
+FROM node:24-alpine3.23 AS runner
 
 WORKDIR /app
 

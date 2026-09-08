@@ -1,7 +1,7 @@
 name: PR Feishu Thread
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened]
     branches:
       - main
@@ -10,20 +10,23 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   notify-pr-opened:
     name: Notify PR opened
     if: github.actor != 'dependabot[bot]'
-    runs-on: arc-runners-mekong
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     timeout-minutes: 5
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
 
       - name: Get Feishu message ID from PR comments
