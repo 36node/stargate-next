@@ -10,7 +10,7 @@ trustLockfile: true
 
 catalogs:
   toolchain:
-    "@types/node": ^24
+    "@types/node": ^26
     tsx: ~4.23.12
     typescript: ~6.0.3
     vitest: ^4.1.9
