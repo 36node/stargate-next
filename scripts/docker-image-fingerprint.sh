@@ -213,9 +213,10 @@ playground_copy_inputs=(
 )
 
 db_copy_inputs=(
+  "packages/db/docker-runtime/package.json"
+  "packages/db/docker-runtime/package-lock.json"
   "packages/db/prisma"
   "packages/db/prisma.config.ts"
-  "packages/db/package.json"
   "packages/db/studio-proxy.ts"
 )
 

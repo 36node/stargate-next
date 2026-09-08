@@ -34,7 +34,7 @@ verify_db_runtime() {
       fs.accessSync(path);
     }
   '
-  docker run --rm --workdir /app --entrypoint npx "$IMAGE" --yes prisma --version
+  docker run --rm --network none --workdir /app --entrypoint prisma "$IMAGE" --version
 }
 
 case "$TARGET" in

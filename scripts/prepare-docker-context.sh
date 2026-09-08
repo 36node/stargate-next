@@ -84,25 +84,44 @@ verify_alpine_dependencies() {
 
 restore_prisma_client() {
   local deploy_dir="$1"
+  local runtime_client_package_dir
   local runtime_client_dir
   local runtime_prisma_dir
+  local source_client_package_dir
   local source_prisma_dir
   local prisma_version
 
-  runtime_client_dir="$(find "$deploy_dir/node_modules/.pnpm" -path '*/node_modules/@prisma/client' -type d | head -n 1)"
-  require_path "$runtime_client_dir"
-  runtime_prisma_dir="$(dirname "$(dirname "$runtime_client_dir")")/.prisma"
-
-  prisma_version="$(node -p "require('$runtime_client_dir/package.json').version")"
-  source_prisma_dir="$(
-    find "$ROOT_DIR/node_modules/.pnpm" \
-      -path "*@prisma+client@${prisma_version}*/node_modules/.prisma/client/default.js" \
+  # Limit both lookups to direct virtual-store entries. Workspace packages may
+  # contain ignored local deploy artifacts, which must never win this lookup.
+  runtime_client_package_dir="$(
+    find "$deploy_dir/node_modules/.pnpm" \
+      -mindepth 1 \
+      -maxdepth 1 \
+      -type d \
+      -name '@prisma+client@*' \
       -print \
       -quit
   )"
-  require_path "$source_prisma_dir"
-  source_prisma_dir="$(dirname "$(dirname "$source_prisma_dir")")"
+  require_path "$runtime_client_package_dir"
+  runtime_client_dir="$runtime_client_package_dir/node_modules/@prisma/client"
+  require_path "$runtime_client_dir"
+  runtime_prisma_dir="$runtime_client_package_dir/node_modules/.prisma"
 
+  prisma_version="$(node -p "require('$runtime_client_dir/package.json').version")"
+  source_client_package_dir="$(
+    find "$ROOT_DIR/node_modules/.pnpm" \
+      -mindepth 1 \
+      -maxdepth 1 \
+      -type d \
+      -name "@prisma+client@${prisma_version}_*" \
+      -print \
+      -quit
+  )"
+  require_path "$source_client_package_dir"
+  source_prisma_dir="$source_client_package_dir/node_modules/.prisma"
+  require_path "$source_prisma_dir"
+
+  rm -rf -- "$runtime_prisma_dir"
   cp -R "$source_prisma_dir" "$runtime_prisma_dir"
   require_path "$runtime_prisma_dir/client/default.js"
 }
