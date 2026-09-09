@@ -1,6 +1,6 @@
 /** SDK 必须显式区分 Tenant 数据面与控制面请求头。 */
 
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateNextClient } from "@36node/stargate-next-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 describe("StargateNextClient Tenant headers", () => {

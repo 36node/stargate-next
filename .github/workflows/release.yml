@@ -41,6 +41,8 @@ jobs:
       playground_tag: ${{ steps.release.outputs['apps/playground--tag_name'] }}
       db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
       db_tag: ${{ steps.release.outputs['packages/db--tag_name'] }}
+      sdk_released: ${{ steps.release.outputs['packages/stargate-next-sdk--release_created'] }}
+      sdk_tag: ${{ steps.release.outputs['packages/stargate-next-sdk--tag_name'] }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -50,7 +52,7 @@ jobs:
 
   docker:
     needs: [registry-config, release-please]
-    if: ${{ needs['release-please'].outputs.releases_created == 'true' }}
+    if: ${{ needs['release-please'].outputs.stargate_next_released == 'true' || needs['release-please'].outputs.playground_released == 'true' || needs['release-please'].outputs.db_released == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -134,3 +136,42 @@ jobs:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
           DB_TAGS: ${{ steps.image-plan.outputs.db_tags }}
+
+  npm:
+    needs: release-please
+    if: ${{ needs['release-please'].outputs.sdk_released == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify generated SDK
+        run: |
+          pnpm sdk:generate
+          git diff --exit-code -- packages/stargate-next-sdk/src
+      - name: Verify npm package
+        run: pnpm --filter @36node/stargate-next-sdk check:package
+      - name: Publish npm package
+        working-directory: packages/stargate-next-sdk
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN" --location=user
+          fi
+          npm publish --access public --provenance

@@ -1,6 +1,6 @@
 import createClient from "openapi-fetch";
 
-import type { components, paths } from "./openapi";
+import type { components, paths } from "./openapi.js";
 
 export type Account = components["schemas"]["Account"];
 export type AccountCollection = components["schemas"]["AccountCollection"];

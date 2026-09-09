@@ -1,6 +1,26 @@
 # Stargate Next SDK
 
-此包用于预留从 Stargate Next OpenAPI 契约生成的 API 绑定。
+Stargate Next 身份认证 API 的 TypeScript SDK。包提供生成的 OpenAPI 类型、底层 `openapi-fetch` client，以及面向常用身份流程的 `StargateNextClient`。
+
+## 安装
+
+```sh
+pnpm add @36node/stargate-next-sdk
+```
+
+SDK 以 ESM 发布，支持现代浏览器和 Node.js 18 及以上版本。
+
+## 使用
+
+```ts
+import { StargateNextClient } from "@36node/stargate-next-sdk";
+
+const client = new StargateNextClient("https://api.stargate.example.com", {
+  apiKey: process.env.STARGATE_API_KEY,
+});
+
+const health = await client.ready();
+```
 
 ## Tenant 作用域
 

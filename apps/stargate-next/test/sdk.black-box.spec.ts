@@ -1,4 +1,4 @@
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateNextClient } from "@36node/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
 function env(name: string): string {

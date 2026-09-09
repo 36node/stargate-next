@@ -1,4 +1,4 @@
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateNextClient } from "@36node/stargate-next-sdk";
 import type { ReactNode } from "react";
 
 import { env } from "@/packages/services/env";

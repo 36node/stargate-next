@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@repo/stargate-next-sdk", () => ({
+vi.mock("@36node/stargate-next-sdk", () => ({
   StargateApiError: mocks.StargateApiError,
   StargateNextClient: vi.fn(function StargateNextClient() {
     return { selfChangePassword: mocks.selfChangePassword };

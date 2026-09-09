@@ -22,7 +22,7 @@
     "db:migrate": "pnpm --filter @repo/db migrate:deploy",
     "db:studio": "pnpm --filter @repo/db studio",
     "seed": "pnpm --filter stargate-next seed",
-    "sdk:generate": "pnpm --filter @repo/stargate-next-sdk generate",
+    "sdk:generate": "pnpm --filter @36node/stargate-next-sdk generate",
     "storybook": "pnpm -C apps/playground storybook",
     "postinstall": "scripts/setup-env.sh",
     "prepare": "husky"

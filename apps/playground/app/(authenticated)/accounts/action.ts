@@ -2,7 +2,10 @@
 
 import { randomUUID } from "node:crypto";
 
-import { StargateApiError, StargateNextClient } from "@repo/stargate-next-sdk";
+import {
+  StargateApiError,
+  StargateNextClient,
+} from "@36node/stargate-next-sdk";
 import { revalidatePath } from "next/cache";
 
 import { sessionCookieNames } from "@/auth-config";
