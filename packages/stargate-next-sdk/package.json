@@ -1,6 +1,6 @@
 {
   "name": "@36node/stargate-next-sdk",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "TypeScript SDK for Stargate Next authentication APIs",
   "keywords": [
     "stargate",
