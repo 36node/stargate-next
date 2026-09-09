@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: [SDK Alpha Build]
+    types: [completed]
 
 permissions:
   contents: read
@@ -13,6 +16,7 @@ env:
 
 jobs:
   registry-config:
+    if: ${{ github.event_name != 'workflow_run' }}
     runs-on: ubuntu-latest
     outputs:
       registry: ${{ steps.registry.outputs.registry }}
@@ -29,6 +33,7 @@ jobs:
 
   release-please:
     needs: registry-config
+    if: ${{ github.event_name != 'workflow_run' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -175,3 +180,111 @@ jobs:
             npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN" --location=user
           fi
           npm publish --access public --provenance
+
+  npm-alpha:
+    if: >-
+      ${{
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.actor.login != 'dependabot[bot]' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.pull_requests[0].number != null
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.20.0
+      - name: Download SDK alpha artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: stargate-next-sdk-alpha
+          path: ${{ runner.temp }}/sdk-alpha
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify SDK alpha artifact
+        id: artifact
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/sdk-alpha
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          short_sha="${HEAD_SHA:0:7}"
+          expected_name="@36node/stargate-next-sdk"
+          expected_version="0.0.0-alpha.${PR_NUMBER}.g${short_sha}"
+          tarball="$ARTIFACT_DIR/36node-stargate-next-sdk-${expected_version}.tgz"
+          metadata="$ARTIFACT_DIR/metadata.json"
+
+          test -f "$tarball"
+          test -f "$metadata"
+          test "$(wc -c < "$tarball")" -le 5242880
+          jq -e \
+            --arg head_sha "$HEAD_SHA" \
+            --arg name "$expected_name" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg version "$expected_version" \
+            '.headSha == $head_sha and .name == $name and .prNumber == $pr_number and .version == $version' \
+            "$metadata" > /dev/null
+
+          package_json="$(tar -xOf "$tarball" package/package.json)"
+          test "$(jq -r '.name' <<< "$package_json")" = "$expected_name"
+          test "$(jq -r '.version' <<< "$package_json")" = "$expected_version"
+
+          {
+            echo "name=$expected_name"
+            echo "version=$expected_version"
+            echo "tag=alpha"
+            echo "tarball=$tarball"
+          } >> "$GITHUB_OUTPUT"
+      - name: Check existing alpha version
+        id: existing
+        env:
+          PACKAGE_NAME: ${{ steps.artifact.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.artifact.outputs.version }}
+        run: |
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version \
+            --registry https://registry.npmjs.org/ > /dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "${PACKAGE_NAME}@${PACKAGE_VERSION} already exists; skipping publish"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish SDK alpha
+        if: steps.existing.outputs.publish == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE_TAG: ${{ steps.artifact.outputs.tag }}
+          TARBALL: ${{ steps.artifact.outputs.tarball }}
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN" --location=user
+          fi
+          npm publish "$TARBALL" \
+            --access public \
+            --ignore-scripts \
+            --provenance \
+            --registry https://registry.npmjs.org/ \
+            --tag "$PACKAGE_TAG"
+      - name: Write alpha summary
+        env:
+          PACKAGE_NAME: ${{ steps.artifact.outputs.name }}
+          PACKAGE_TAG: ${{ steps.artifact.outputs.tag }}
+          PACKAGE_VERSION: ${{ steps.artifact.outputs.version }}
+          PUBLISH_REQUIRED: ${{ steps.existing.outputs.publish }}
+        run: |
+          {
+            echo "## SDK alpha package"
+            echo
+            echo "- Version: \`${PACKAGE_NAME}@${PACKAGE_VERSION}\`"
+            echo "- Tag: \`${PACKAGE_TAG}\`"
+            echo "- Published in this run: \`${PUBLISH_REQUIRED}\`"
+            echo "- Install: \`pnpm add ${PACKAGE_NAME}@${PACKAGE_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
