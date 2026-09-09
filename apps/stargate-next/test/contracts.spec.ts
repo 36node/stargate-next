@@ -18,7 +18,7 @@ import type {
   TenantApiKey,
   TenantApiKeyCollection,
   TenantCollection,
-} from "@repo/stargate-next-sdk";
+} from "@36node/stargate-next-sdk";
 import type {
   AccountInput,
   AccountPatchInput,

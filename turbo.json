@@ -32,15 +32,16 @@
       ]
     },
     "test": {
-      "dependsOn": ["^test"]
+      "dependsOn": ["@36node/stargate-next-sdk#build:ci", "^test"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["@36node/stargate-next-sdk#build:ci", "^typecheck"]
     },
     "analyze": {
       "dependsOn": ["^analyze"]
     },
     "dev": {
+      "dependsOn": ["@36node/stargate-next-sdk#build:ci"],
       "cache": false,
       "persistent": true
     },

@@ -1,6 +1,6 @@
 "use server";
 
-import { StargateApiError } from "@repo/stargate-next-sdk";
+import { StargateApiError } from "@36node/stargate-next-sdk";
 
 import { resolveTenantId } from "@/auth-config";
 import { signIn } from "../../../stargate";

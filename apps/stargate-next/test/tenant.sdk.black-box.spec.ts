@@ -1,6 +1,6 @@
 /** Multi-tenant SDK 控制面、数据面与 Tenant Key 黑盒回归。 */
 
-import { StargateNextClient } from "@repo/stargate-next-sdk";
+import { StargateNextClient } from "@36node/stargate-next-sdk";
 import { describe, expect, it } from "vitest";
 
 const TENANT_API_KEY_PATTERN = /^stk_[A-Za-z0-9_-]{32}$/;

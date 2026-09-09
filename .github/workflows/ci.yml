@@ -182,6 +182,8 @@ jobs:
         run: |
           pnpm sdk:generate
           git diff --exit-code -- packages/stargate-next-sdk/src
+      - name: Verify SDK npm package
+        run: pnpm --filter @36node/stargate-next-sdk check:package
       - name: Typecheck
         run: pnpm typecheck
       - name: Test

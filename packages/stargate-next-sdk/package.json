@@ -1,21 +1,44 @@
 {
-  "name": "@repo/stargate-next-sdk",
+  "name": "@36node/stargate-next-sdk",
   "version": "0.0.0",
-  "private": true,
+  "description": "TypeScript SDK for Stargate Next authentication APIs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/36node/stargate-next.git",
+    "directory": "packages/stargate-next-sdk"
+  },
+  "homepage": "https://github.com/36node/stargate-next/tree/main/packages/stargate-next-sdk",
+  "bugs": "https://github.com/36node/stargate-next/issues",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
-    "build": "tsc --noEmit",
-    "build:ci": "tsc --noEmit",
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "build:ci": "pnpm run build",
+    "check:package": "pnpm run build && node --input-type=module --eval \"await import('@36node/stargate-next-sdk')\" && npm pack --dry-run",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { force: true, recursive: true })\"",
     "generate": "openapi-typescript ../../apps/stargate-next/openapi.json -o src/openapi.ts",
+    "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

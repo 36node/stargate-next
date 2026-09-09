@@ -1,2 +1,2 @@
-export * from "./generated";
-export * from "./openapi";
+export * from "./generated.js";
+export * from "./openapi.js";

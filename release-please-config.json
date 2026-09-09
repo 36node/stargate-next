@@ -17,6 +17,12 @@
       "component": "db",
       "package-name": "@repo/db",
       "release-type": "node"
+    },
+    "packages/stargate-next-sdk": {
+      "component": "stargate-next-sdk",
+      "package-name": "@36node/stargate-next-sdk",
+      "release-type": "node",
+      "initial-version": "1.2.0"
     }
   }
 }
