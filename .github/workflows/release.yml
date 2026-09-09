@@ -174,12 +174,13 @@ jobs:
       - name: Publish npm package
         working-directory: packages/stargate-next-sdk
         env:
+          NPM_CONFIG_PROVENANCE: "false"
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -n "${NPM_TOKEN:-}" ]; then
             npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN" --location=user
           fi
-          npm publish --access public --provenance
+          npm publish --access public
 
   npm-alpha:
     if: >-
@@ -260,6 +261,7 @@ jobs:
       - name: Publish SDK alpha
         if: steps.existing.outputs.publish == 'true'
         env:
+          NPM_CONFIG_PROVENANCE: "false"
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           PACKAGE_TAG: ${{ steps.artifact.outputs.tag }}
           TARBALL: ${{ steps.artifact.outputs.tarball }}
@@ -270,7 +272,6 @@ jobs:
           npm publish "$TARBALL" \
             --access public \
             --ignore-scripts \
-            --provenance \
             --registry https://registry.npmjs.org/ \
             --tag "$PACKAGE_TAG"
       - name: Write alpha summary

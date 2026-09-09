@@ -36,7 +36,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "provenance": true,
+    "provenance": false,
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {

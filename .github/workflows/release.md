@@ -35,6 +35,6 @@ pnpm add @36node/stargate-next-sdk@0.0.0-alpha.58.gabc1234
 2. Repository 填写 `36node/stargate-next`，workflow 文件填写 `release.yml`，environment 留空。
 3. 删除 GitHub Repository Secret `NPM_TOKEN`。
 
-此后 workflow 会通过 GitHub OIDC 发布，不再使用长期 npm token。发布 job 具有 `id-token: write` 权限，并为 npm 包生成 provenance。
+此后 workflow 会通过 GitHub OIDC 发布，不再使用长期 npm token。发布 job 保留 `id-token: write` 权限；由于 GitHub 源仓库是 private，包配置显式关闭 npm provenance，避免 npmjs 的 Sigstore 校验返回 `E422`。
 
 发布 job 使用 GitHub 托管的 `ubuntu-latest`、Node.js `24.20.0` 与 pnpm `11.24.0`。Repository Variable `IMAGE_REGISTRY_PROVIDER` 当前仅支持 `harbor`（未设置时默认使用 Harbor），镜像构建使用公开官方基础镜像。

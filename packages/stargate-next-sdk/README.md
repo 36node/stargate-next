@@ -10,6 +10,12 @@ pnpm add @36node/stargate-next-sdk
 
 SDK 以 ESM 发布，支持现代浏览器和 Node.js 18 及以上版本。
 
+PR 预览版本通过 `alpha` dist-tag 发布，可用于集成验证：
+
+```sh
+pnpm add @36node/stargate-next-sdk@alpha
+```
+
 ## 使用
 
 ```ts
