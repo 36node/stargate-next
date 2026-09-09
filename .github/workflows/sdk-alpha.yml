@@ -1,0 +1,76 @@
+name: SDK Alpha Build
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main, "milestone/*", "release/*"]
+
+concurrency:
+  group: sdk-alpha-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SDK alpha package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify generated SDK
+        run: |
+          pnpm sdk:generate
+          git diff --exit-code -- packages/stargate-next-sdk/src
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Verify npm package
+        run: pnpm --filter @36node/stargate-next-sdk check:package
+      - name: Pack alpha artifact
+        working-directory: packages/stargate-next-sdk
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          short_sha="${HEAD_SHA:0:7}"
+          version="0.0.0-alpha.${PR_NUMBER}.g${short_sha}"
+          artifact_dir="$RUNNER_TEMP/sdk-alpha"
+          mkdir -p "$artifact_dir"
+
+          npm version "$version" --no-git-tag-version --ignore-scripts
+          npm pack . \
+            --ignore-scripts \
+            --pack-destination "$artifact_dir"
+
+          jq -n \
+            --arg head_sha "$HEAD_SHA" \
+            --arg name "@36node/stargate-next-sdk" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg version "$version" \
+            '{headSha:$head_sha,name:$name,prNumber:$pr_number,version:$version}' \
+            > "$artifact_dir/metadata.json"
+      - name: Upload alpha artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stargate-next-sdk-alpha
+          path: ${{ runner.temp }}/sdk-alpha/
+          retention-days: 1
+          if-no-files-found: error

@@ -8,9 +8,28 @@ Release Please 会独立管理 `apps/stargate-next`、`apps/playground`、`packa
 
 SDK release 会将公开 ESM 包 `@36node/stargate-next-sdk` 发布到 npmjs。SDK 首个版本为 `1.2.0`，后续版本由 Conventional Commits 和 Release Please 管理。
 
+### PR Alpha 发布
+
+每个目标分支 PR 在创建、重新打开或推送新 commit 时，`SDK Alpha Build` 都会运行，并在类型检查、测试和包校验通过后生成版本，不检测 SDK 或 OpenAPI 文件是否发生变化：
+
+```text
+0.0.0-alpha.<PR号>.g<短SHA>
+```
+
+无权限的 PR workflow 只上传 npm tarball；默认分支上的 `release.yml` 通过 `workflow_run` 下载并校验产物，只为同仓库、非 Dependabot 的成功 PR 发布。发布阶段不会 checkout 或执行 PR 代码。
+
+所有 PR alpha 共用 `alpha` dist-tag，最后完成发布的 PR 会更新该 tag：
+
+```sh
+pnpm add @36node/stargate-next-sdk@alpha
+pnpm add @36node/stargate-next-sdk@0.0.0-alpha.58.gabc1234
+```
+
+相同 PR commit 的 workflow rerun 会检测已有版本并跳过发布。历史 alpha 版本和 `alpha` tag 不在 PR 关闭时清理。
+
 ### npmjs 认证
 
-新包首次发布前，在 GitHub Repository Secret 中配置临时 `NPM_TOKEN`。Token 必须能够在 `@36node` scope 创建并公开发布包。首次发布成功后：
+新包首次 stable 或 alpha 发布前，在 GitHub Repository Secret 中配置临时 `NPM_TOKEN`。Token 必须能够在 `@36node` scope 创建并公开发布包。首次发布成功后：
 
 1. 在 npmjs 的 `@36node/stargate-next-sdk` 包设置中添加 GitHub Actions Trusted Publisher。
 2. Repository 填写 `36node/stargate-next`，workflow 文件填写 `release.yml`，environment 留空。
