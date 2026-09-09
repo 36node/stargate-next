@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.1](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v1.2.0...stargate-next-sdk-v1.2.1) (2026-09-09)
+
+
+### Features
+
+* **stargate-next-sdk:** prepare first npmjs release ([34f1c23](https://github.com/36node/stargate-next/commit/34f1c237a89552e1d4627903777a15056fa1ca63))
+
+
+### Bug Fixes
+
+* **stargate-next-sdk:** fix npm publishing ([efe9888](https://github.com/36node/stargate-next/commit/efe98884e835881dc6975df3175e67a644ae4148))
+
 ## 1.2.0 (2026-09-09)
 
 
