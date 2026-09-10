@@ -37,20 +37,29 @@ jobs:
       - name: Build main update content
         id: main-content
         env:
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
           short_sha="${HEAD_SHA:0:7}"
           post_content="$(jq -cn \
+            --arg commit_url "$COMMIT_URL" \
             --arg short_sha "$short_sha" \
             '{
               zh_cn: {
                 title: "stargate-next main 分支已更新",
-                content: [[{
-                  tag: "text",
-                  text: "提交: \($short_sha)"
-                }]]
+                content: [[
+                  {
+                    tag: "text",
+                    text: "提交: "
+                  },
+                  {
+                    tag: "a",
+                    text: $short_sha,
+                    href: $commit_url
+                  }
+                ]]
               }
             }')"
 
@@ -1060,20 +1069,50 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           API_URL: http://api.stargate-next-pr-${{ github.event.pull_request.number }}.36node.com
           PLAYGROUND_URL: http://playground.stargate-next-pr-${{ github.event.pull_request.number }}.36node.com
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
 
           short_sha="${HEAD_SHA:0:7}"
-          {
-            echo 'content<<EOF'
-            printf 'PR #%s 部署成功（Commit: %s）\n' "$PR_NUMBER" "$short_sha"
-            printf '\n'
-            printf '访问地址：\n'
-            printf -- '- API：%s\n' "$API_URL"
-            printf -- '- Playground：%s\n' "$PLAYGROUND_URL"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          post_content="$(jq -cn \
+            --arg api_url "$API_URL" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg playground_url "$PLAYGROUND_URL" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg short_sha "$short_sha" \
+            '{
+              zh_cn: {
+                title: "PR #\($pr_number) 部署成功",
+                content: [
+                  [
+                    {
+                      tag: "text",
+                      text: "Commit: "
+                    },
+                    {
+                      tag: "a",
+                      text: $short_sha,
+                      href: $commit_url
+                    }
+                  ],
+                  [{
+                    tag: "text",
+                    text: "访问地址："
+                  }],
+                  [{
+                    tag: "text",
+                    text: "- API：\($api_url)"
+                  }],
+                  [{
+                    tag: "text",
+                    text: "- Playground：\($playground_url)"
+                  }]
+                ]
+              }
+            }')"
+
+          echo "content=$post_content" >> "$GITHUB_OUTPUT"
 
       - name: Reply Feishu thread
         if: steps.pr-comments.outputs.found == 'true'
@@ -1082,6 +1121,7 @@ jobs:
           app_id: ${{ secrets.FEISHU_APP_ID }}
           app_secret: ${{ secrets.FEISHU_APP_SECRET }}
           message_id: ${{ steps.pr-comments.outputs.value }}
+          msg_type: post
           content: ${{ steps.notify-content.outputs.content }}
 
       - name: Skip missing Feishu thread
@@ -1119,24 +1159,56 @@ jobs:
           DEPLOY_RESULT: ${{ needs.deploy.result }}
           API_URL: https://api.stargate-next-uat.36node.com
           PLAYGROUND_URL: https://playground.stargate-next-uat.36node.com
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
           short_sha="${HEAD_SHA:0:7}"
-          {
-            echo 'content<<EOF'
-            if [ "$DEPLOY_RESULT" = "success" ]; then
-              printf 'UAT 部署成功（Commit: %s）\n' "$short_sha"
-              printf '\n'
-              printf '访问地址：\n'
-              printf -- '- API：%s\n' "$API_URL"
-              printf -- '- Playground：%s\n' "$PLAYGROUND_URL"
-            else
-              printf 'UAT 部署失败（Commit: %s）\n' "$short_sha"
-            fi
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          post_content="$(jq -cn \
+            --arg api_url "$API_URL" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg deploy_result "$DEPLOY_RESULT" \
+            --arg playground_url "$PLAYGROUND_URL" \
+            --arg short_sha "$short_sha" \
+            '{
+              zh_cn: {
+                title: (if $deploy_result == "success" then "UAT 部署成功" else "UAT 部署失败" end),
+                content: (
+                  [[
+                    {
+                      tag: "text",
+                      text: "Commit: "
+                    },
+                    {
+                      tag: "a",
+                      text: $short_sha,
+                      href: $commit_url
+                    }
+                  ]] +
+                  if $deploy_result == "success" then
+                    [
+                      [{
+                        tag: "text",
+                        text: "访问地址："
+                      }],
+                      [{
+                        tag: "text",
+                        text: "- API：\($api_url)"
+                      }],
+                      [{
+                        tag: "text",
+                        text: "- Playground：\($playground_url)"
+                      }]
+                    ]
+                  else
+                    []
+                  end
+                )
+              }
+            }')"
+
+          echo "content=$post_content" >> "$GITHUB_OUTPUT"
 
       - name: Reply Feishu thread
         uses: ./.github/actions/feishu-reply
@@ -1144,4 +1216,5 @@ jobs:
           app_id: ${{ secrets.FEISHU_APP_ID }}
           app_secret: ${{ secrets.FEISHU_APP_SECRET }}
           message_id: ${{ needs['notify-main-updated'].outputs.message_id }}
+          msg_type: post
           content: ${{ steps.notify-content.outputs.content }}
