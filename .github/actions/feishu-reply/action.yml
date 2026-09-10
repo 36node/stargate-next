@@ -11,8 +11,12 @@ inputs:
   message_id:
     description: 'Message ID to reply to'
     required: true
+  msg_type:
+    description: 'Message type: text, post'
+    required: false
+    default: 'text'
   content:
-    description: 'Reply content as text'
+    description: 'Reply content. Text is plain text; post is JSON.'
     required: true
   reply_in_thread:
     description: 'Whether to reply in thread'
@@ -60,17 +64,35 @@ runs:
       env:
         FEISHU_TOKEN: ${{ steps.token.outputs.token }}
         MESSAGE_ID: ${{ inputs.message_id }}
+        MSG_TYPE: ${{ inputs.msg_type }}
         CONTENT: ${{ inputs.content }}
         REPLY_IN_THREAD: ${{ inputs.reply_in_thread }}
       run: |
         set -euo pipefail
 
-        msg_content="$(jq -n --arg text "$CONTENT" '{text: $text}')"
+        case "$MSG_TYPE" in
+          text)
+            msg_content="$(jq -n --arg text "$CONTENT" '{text: $text}')"
+            ;;
+          post)
+            if ! jq -e . >/dev/null 2>&1 <<< "$CONTENT"; then
+              echo "::error::Post content must be valid JSON"
+              exit 1
+            fi
+            msg_content="$CONTENT"
+            ;;
+          *)
+            echo "::error::Unsupported message type: $MSG_TYPE"
+            exit 1
+            ;;
+        esac
+
         thread_flag="$([ "$REPLY_IN_THREAD" = "true" ] && echo "true" || echo "false")"
         request_body="$(jq -n \
+          --arg msg_type "$MSG_TYPE" \
           --arg content "$msg_content" \
           --argjson reply_in_thread "$thread_flag" \
-          '{msg_type: "text", content: $content, reply_in_thread: $reply_in_thread}')"
+          '{msg_type: $msg_type, content: $content, reply_in_thread: $reply_in_thread}')"
 
         response="$(curl -sS -X POST "https://open.feishu.cn/open-apis/im/v1/messages/${MESSAGE_ID}/reply" \
           -H "Authorization: Bearer $FEISHU_TOKEN" \
