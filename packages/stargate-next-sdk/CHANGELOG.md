@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v1.2.1...stargate-next-sdk-v2.0.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* paginated query responses now return flat resources.
+
+### Features
+
+* flat list response ([3e2a7b5](https://github.com/36node/stargate-next/commit/3e2a7b5180f9555429734717361ddd48fde03c7d))
+* flatten Stargate Next query responses ([46cc6d7](https://github.com/36node/stargate-next/commit/46cc6d720f566c788b9e2147b49520a3ea475d62))
+
 ## [1.2.1](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v1.2.0...stargate-next-sdk-v1.2.1) (2026-09-09)
 
 
