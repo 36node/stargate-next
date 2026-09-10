@@ -128,12 +128,12 @@ describe("Tenant API Key service integration", () => {
     );
     expect(JSON.stringify(stored)).not.toContain(created.key);
 
-    const listed = await service.listTenantApiKeys(
-      scope,
-      100,
-      0,
-      "/v1/tenant-api-keys"
-    );
+    const listed = await service.listTenantApiKeys(scope, 100, 0);
+    expect(listed.meta).toEqual({ limit: 100, offset: 0, total: 1 });
+    expect(listed).not.toHaveProperty("links");
+    expect(listed.data[0]).toMatchObject({ id: created.id, name: "worker" });
+    expect(listed.data[0]).not.toHaveProperty("attributes");
+    expect(listed.data[0]).not.toHaveProperty("type");
     const serialized = JSON.stringify(listed);
     expect(serialized).not.toContain(created.key);
     expect(serialized).not.toContain(stored.hash);

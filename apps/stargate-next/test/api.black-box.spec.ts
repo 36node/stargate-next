@@ -56,7 +56,7 @@ describe("Given a running Stargate Next service", () => {
     );
   });
 
-  it("returns JSON:API account resources with page metadata", async () => {
+  it("returns flat account resources with pagination metadata", async () => {
     const suffix = `${Date.now().toString(36)}list`;
     await request("/v1/accounts", "POST", {
       body: {
@@ -73,12 +73,9 @@ describe("Given a running Stargate Next service", () => {
     );
     expect(listed.status).toBe(200);
     expect(
-      (listed.body as { data: unknown[]; meta: { page: { limit: number } } })
-        .data.length
+      (listed.body as { data: unknown[]; meta: { limit: number } }).data.length
     ).toBeGreaterThan(0);
-    expect(
-      (listed.body as { meta: { page: { limit: number } } }).meta.page.limit
-    ).toBe(10);
+    expect((listed.body as { meta: { limit: number } }).meta.limit).toBe(10);
   });
 
   it("consumes a captcha and establishes a refreshable session", async () => {

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Stargate Next API",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "Authentication and account identity API. Account and session management operations require x-api-key."
   },
   "paths": {
@@ -717,41 +717,21 @@
       },
       "AccountCollection": {
         "type": "object",
-        "required": ["data", "links", "meta"],
+        "additionalProperties": false,
+        "required": ["data", "meta"],
         "properties": {
           "data": {
             "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["type", "id", "attributes"],
-              "properties": {
-                "type": { "const": "accounts" },
-                "id": { "type": "string" },
-                "attributes": { "$ref": "#/components/schemas/Account" }
-              }
-            }
-          },
-          "links": {
-            "type": "object",
-            "required": ["self"],
-            "properties": {
-              "self": { "type": "string" },
-              "next": { "type": "string" }
-            }
+            "items": { "$ref": "#/components/schemas/Account" }
           },
           "meta": {
             "type": "object",
-            "required": ["page"],
+            "additionalProperties": false,
+            "required": ["offset", "limit", "total"],
             "properties": {
-              "page": {
-                "type": "object",
-                "required": ["offset", "limit", "total"],
-                "properties": {
-                  "offset": { "type": "integer" },
-                  "limit": { "type": "integer" },
-                  "total": { "type": "integer" }
-                }
-              }
+              "offset": { "type": "integer" },
+              "limit": { "type": "integer" },
+              "total": { "type": "integer" }
             }
           }
         }
@@ -817,41 +797,21 @@
       },
       "TenantCollection": {
         "type": "object",
-        "required": ["data", "links", "meta"],
+        "additionalProperties": false,
+        "required": ["data", "meta"],
         "properties": {
           "data": {
             "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["type", "id", "attributes"],
-              "properties": {
-                "type": { "const": "tenants" },
-                "id": { "type": "string" },
-                "attributes": { "$ref": "#/components/schemas/Tenant" }
-              }
-            }
-          },
-          "links": {
-            "type": "object",
-            "required": ["self"],
-            "properties": {
-              "self": { "type": "string" },
-              "next": { "type": "string" }
-            }
+            "items": { "$ref": "#/components/schemas/Tenant" }
           },
           "meta": {
             "type": "object",
-            "required": ["page"],
+            "additionalProperties": false,
+            "required": ["offset", "limit", "total"],
             "properties": {
-              "page": {
-                "type": "object",
-                "required": ["offset", "limit", "total"],
-                "properties": {
-                  "offset": { "type": "integer" },
-                  "limit": { "type": "integer" },
-                  "total": { "type": "integer" }
-                }
-              }
+              "offset": { "type": "integer" },
+              "limit": { "type": "integer" },
+              "total": { "type": "integer" }
             }
           }
         }
@@ -909,43 +869,21 @@
       },
       "TenantApiKeyCollection": {
         "type": "object",
-        "required": ["data", "links", "meta"],
+        "additionalProperties": false,
+        "required": ["data", "meta"],
         "properties": {
           "data": {
             "type": "array",
-            "items": {
-              "type": "object",
-              "required": ["type", "id", "attributes"],
-              "properties": {
-                "type": { "const": "tenant-api-keys" },
-                "id": { "type": "string" },
-                "attributes": {
-                  "$ref": "#/components/schemas/TenantApiKey"
-                }
-              }
-            }
-          },
-          "links": {
-            "type": "object",
-            "required": ["self"],
-            "properties": {
-              "self": { "type": "string" },
-              "next": { "type": "string" }
-            }
+            "items": { "$ref": "#/components/schemas/TenantApiKey" }
           },
           "meta": {
             "type": "object",
-            "required": ["page"],
+            "additionalProperties": false,
+            "required": ["offset", "limit", "total"],
             "properties": {
-              "page": {
-                "type": "object",
-                "required": ["offset", "limit", "total"],
-                "properties": {
-                  "offset": { "type": "integer" },
-                  "limit": { "type": "integer" },
-                  "total": { "type": "integer" }
-                }
-              }
+              "offset": { "type": "integer" },
+              "limit": { "type": "integer" },
+              "total": { "type": "integer" }
             }
           }
         }
@@ -1003,11 +941,8 @@
         }
       },
       "AccountCollection": {
-        "description": "JSON:API account collection",
+        "description": "Flat account collection with pagination metadata",
         "content": {
-          "application/vnd.api+json": {
-            "schema": { "$ref": "#/components/schemas/AccountCollection" }
-          },
           "application/json": {
             "schema": { "$ref": "#/components/schemas/AccountCollection" }
           }
@@ -1022,11 +957,8 @@
         }
       },
       "TenantCollection": {
-        "description": "JSON:API tenant collection",
+        "description": "Flat tenant collection with pagination metadata",
         "content": {
-          "application/vnd.api+json": {
-            "schema": { "$ref": "#/components/schemas/TenantCollection" }
-          },
           "application/json": {
             "schema": { "$ref": "#/components/schemas/TenantCollection" }
           }
@@ -1049,13 +981,8 @@
         }
       },
       "TenantApiKeyCollection": {
-        "description": "JSON:API Tenant API key collection",
+        "description": "Flat Tenant API key collection with pagination metadata",
         "content": {
-          "application/vnd.api+json": {
-            "schema": {
-              "$ref": "#/components/schemas/TenantApiKeyCollection"
-            }
-          },
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/TenantApiKeyCollection"

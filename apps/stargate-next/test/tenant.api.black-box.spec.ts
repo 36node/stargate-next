@@ -7,6 +7,65 @@ const adminApiKey = env("STARGATE_ADMIN_API_KEY");
 const TENANT_API_KEY_PATTERN = /^stk_[A-Za-z0-9_-]{32}$/;
 
 describe("Given the multi-tenant HTTP API", () => {
+  it("returns flat Tenant and Tenant API key collections", async () => {
+    const suffix = `${Date.now().toString(36)}flat`;
+    const tenantId = `bb-${suffix}`;
+    const tenantName = `Flat Collection ${suffix}`;
+    expect(
+      await request("/v1/tenants", "POST", {
+        adminKey: true,
+        body: { id: tenantId, name: tenantName },
+      })
+    ).toMatchObject({ status: 201 });
+
+    const tenants = await request(
+      `/v1/tenants?page[offset]=0&page[limit]=10&filter[name]=${encodeURIComponent(tenantName)}`,
+      "GET",
+      { adminKey: true }
+    );
+    expect(tenants).toMatchObject({
+      status: 200,
+      body: {
+        data: [expect.objectContaining({ id: tenantId, name: tenantName })],
+        meta: { limit: 10, offset: 0, total: 1 },
+      },
+    });
+    expect(tenants.body).not.toHaveProperty("links");
+    expect((tenants.body as { data: unknown[] }).data[0]).not.toHaveProperty(
+      "attributes"
+    );
+    expect((tenants.body as { data: unknown[] }).data[0]).not.toHaveProperty(
+      "type"
+    );
+
+    const createdKey = await request("/v1/tenant-api-keys", "POST", {
+      adminKey: true,
+      body: { name: "flat-list" },
+      tenantId,
+    });
+    expect(createdKey.status).toBe(201);
+    const key = createdKey.body as { id: string; key: string };
+    const keys = await request(
+      "/v1/tenant-api-keys?page[offset]=0&page[limit]=10",
+      "GET",
+      { apiKey: key.key }
+    );
+    expect(keys).toMatchObject({
+      status: 200,
+      body: {
+        data: [expect.objectContaining({ id: key.id, tenantId })],
+        meta: { limit: 10, offset: 0, total: 1 },
+      },
+    });
+    expect(keys.body).not.toHaveProperty("links");
+    expect((keys.body as { data: unknown[] }).data[0]).not.toHaveProperty(
+      "attributes"
+    );
+    expect((keys.body as { data: unknown[] }).data[0]).not.toHaveProperty(
+      "type"
+    );
+  });
+
   it("isolates accounts and enforces the frozen credential matrix", async () => {
     const suffix = Date.now().toString(36);
     const tenantId = `bb-${suffix}`;
@@ -31,11 +90,26 @@ describe("Given the multi-tenant HTTP API", () => {
       { adminKey: true }
     );
     expect(tenantList.status).toBe(200);
-    expect(
-      (tenantList.body as { data: Array<{ id: string }> }).data.map(
-        ({ id }) => id
-      )
-    ).toContain(tenantId);
+    const tenantCollection = tenantList.body as {
+      data: Array<{ id: string; name: string | null }>;
+      meta: { limit: number; offset: number; total: number };
+    };
+    expect(tenantCollection.data.map(({ id }) => id)).toContain(tenantId);
+    expect(tenantCollection.data[0]).toHaveProperty("name");
+    expect(tenantCollection.data[0]).not.toHaveProperty("attributes");
+    expect(tenantCollection.data[0]).not.toHaveProperty("type");
+    expect(tenantCollection.meta).toMatchObject({ limit: 10, offset: 0 });
+    expect(tenantCollection).not.toHaveProperty("links");
+    const emptyTenantList = await request(
+      `/v1/tenants?page[offset]=0&page[limit]=10&filter[name]=${encodeURIComponent(`missing-${tenantId}`)}`,
+      "GET",
+      { adminKey: true }
+    );
+    expect(emptyTenantList).toMatchObject({
+      status: 200,
+      body: { data: [], meta: { limit: 10, offset: 0, total: 0 } },
+    });
+    expect(emptyTenantList.body).not.toHaveProperty("links");
     expect(
       await request(`/v1/tenants/${tenantId}`, "PATCH", {
         adminKey: true,
@@ -203,11 +277,11 @@ describe("Given the multi-tenant HTTP API", () => {
       (
         listed.body as {
           data: Array<{
-            attributes: { settings: { loginCaptchaRequired?: boolean } };
             id: string;
+            settings: { loginCaptchaRequired?: boolean };
           }>;
         }
-      ).data.find(({ id }) => id === tenantId)?.attributes.settings
+      ).data.find(({ id }) => id === tenantId)?.settings
     ).toEqual({ loginCaptchaRequired: false });
 
     expect(
@@ -299,6 +373,21 @@ describe("Given the multi-tenant HTTP API", () => {
       apiKey: key.key,
     });
     expect(listed.status).toBe(200);
+    const keyCollection = listed.body as {
+      data: Array<{ firstFour: string; id: string; tenantId: string }>;
+      meta: { limit: number; offset: number; total: number };
+    };
+    expect(keyCollection.data).toEqual([
+      expect.objectContaining({
+        firstFour: key.firstFour,
+        id: key.id,
+        tenantId,
+      }),
+    ]);
+    expect(keyCollection.data[0]).not.toHaveProperty("attributes");
+    expect(keyCollection.data[0]).not.toHaveProperty("type");
+    expect(keyCollection.meta).toEqual({ limit: 10, offset: 0, total: 1 });
+    expect(keyCollection).not.toHaveProperty("links");
     expect(JSON.stringify(listed.body)).not.toContain(key.key);
     expect(JSON.stringify(listed.body)).not.toContain("hash");
 

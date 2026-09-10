@@ -1069,8 +1069,7 @@ export class StargateService implements StargateServiceContract {
   async listAccounts(
     scope: TenantScope,
     limit: number,
-    offset: number,
-    basePath: string
+    offset: number
   ): Promise<AccountCollection> {
     const where = { deletedAt: null, tenantId: scope.tenantId };
     const [accounts, total] = await db.$transaction([
@@ -1082,20 +1081,9 @@ export class StargateService implements StargateServiceContract {
       }),
       db.account.count({ where }),
     ]);
-    const nextOffset = offset + accounts.length;
-    const query = (next: number) =>
-      `${basePath}?page[offset]=${next}&page[limit]=${limit}`;
     return {
-      data: accounts.map((account) => ({
-        attributes: publicAccount(account),
-        id: account.id,
-        type: "accounts" as const,
-      })),
-      links: {
-        self: query(offset),
-        ...(nextOffset < total ? { next: query(nextOffset) } : {}),
-      },
-      meta: { page: { limit, offset, total } },
+      data: accounts.map(publicAccount),
+      meta: { limit, offset, total },
     };
   }
 
@@ -1854,12 +1842,10 @@ export class StargateService implements StargateServiceContract {
     return publicTenant(tenant);
   }
 
-  // biome-ignore lint/nursery/useMaxParams: Ticket #232 freezes this public contract with TenantScope first.
   async listTenants(
     _scope: AdminScope,
     limit: number,
     offset: number,
-    basePath: string,
     name?: string
   ): Promise<TenantCollection> {
     const where = name === undefined ? {} : { name };
@@ -1872,24 +1858,9 @@ export class StargateService implements StargateServiceContract {
       }),
       db.tenant.count({ where }),
     ]);
-    const nextOffset = offset + tenants.length;
-    const query = (next: number) => {
-      const page = `page[offset]=${next}&page[limit]=${limit}`;
-      return name === undefined
-        ? `${basePath}?${page}`
-        : `${basePath}?${page}&filter[name]=${encodeURIComponent(name)}`;
-    };
     return {
-      data: tenants.map((tenant) => ({
-        attributes: publicTenant(tenant),
-        id: tenant.id,
-        type: "tenants" as const,
-      })),
-      links: {
-        self: query(offset),
-        ...(nextOffset < total ? { next: query(nextOffset) } : {}),
-      },
-      meta: { page: { limit, offset, total } },
+      data: tenants.map(publicTenant),
+      meta: { limit, offset, total },
     };
   }
 
@@ -2012,8 +1983,7 @@ export class StargateService implements StargateServiceContract {
   async listTenantApiKeys(
     scope: TenantScope,
     limit: number,
-    offset: number,
-    basePath: string
+    offset: number
   ): Promise<TenantApiKeyCollection> {
     const select = {
       createdAt: true,
@@ -2033,20 +2003,9 @@ export class StargateService implements StargateServiceContract {
       }),
       db.tenantApiKey.count({ where: { tenantId: scope.tenantId } }),
     ]);
-    const nextOffset = offset + keys.length;
-    const query = (next: number) =>
-      `${basePath}?page[offset]=${next}&page[limit]=${limit}`;
     return {
-      data: keys.map((key) => ({
-        attributes: publicTenantApiKey(key),
-        id: key.id,
-        type: "tenant-api-keys" as const,
-      })),
-      links: {
-        self: query(offset),
-        ...(nextOffset < total ? { next: query(nextOffset) } : {}),
-      },
-      meta: { page: { limit, offset, total } },
+      data: keys.map(publicTenantApiKey),
+      meta: { limit, offset, total },
     };
   }
 

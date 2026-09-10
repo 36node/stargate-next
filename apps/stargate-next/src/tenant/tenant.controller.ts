@@ -78,7 +78,7 @@ export class TenantController {
     );
     const { limit, offset } = parsePage(offsetValue, limitValue);
     const name = singleQueryValue(nameValue);
-    return this.service.listTenants(scope, limit, offset, "/v1/tenants", name);
+    return this.service.listTenants(scope, limit, offset, name);
   }
 
   @Get(":tenantId")

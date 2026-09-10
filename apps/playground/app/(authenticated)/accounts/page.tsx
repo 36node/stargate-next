@@ -46,8 +46,8 @@ export default async function AccountsPage({
       const accounts = await new StargateNextClient(env.STARGATE_ENDPOINT, {
         apiKey: env.STARGATE_API_KEY,
       }).listAccounts(offset, PAGE_SIZE);
-      total = accounts.meta.page?.total ?? accounts.data.length;
-      users = accounts.data.map((resource) => resource.attributes);
+      total = accounts.meta.total;
+      users = accounts.data;
     } else {
       const allUsers =
         (await auth.listUsers({ query: { _limit: 100 } })).data ?? [];

@@ -67,12 +67,7 @@ export class TenantApiKeyController {
       tenantHeader(request)
     );
     const { limit, offset } = parsePage(offsetValue, limitValue);
-    return this.service.listTenantApiKeys(
-      scope,
-      limit,
-      offset,
-      "/v1/tenant-api-keys"
-    );
+    return this.service.listTenantApiKeys(scope, limit, offset);
   }
 
   @Patch(":keyId")

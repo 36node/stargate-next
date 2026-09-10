@@ -168,15 +168,12 @@ describe("Tenant service integration", () => {
     await expect(service.getTenant(adminScope, created.id)).resolves.toEqual(
       created
     );
-    const listed = await service.listTenants(
-      adminScope,
-      10,
-      0,
-      "/v1/tenants",
-      "lifecycle"
-    );
+    const listed = await service.listTenants(adminScope, 10, 0, "lifecycle");
     expect(listed.data.map(({ id }) => id)).toContain(created.id);
-    expect(listed.links.self).toContain("filter[name]=lifecycle");
+    expect(listed.meta).toMatchObject({ limit: 10, offset: 0, total: 1 });
+    expect(listed).not.toHaveProperty("links");
+    expect(listed.data[0]).not.toHaveProperty("attributes");
+    expect(listed.data[0]).not.toHaveProperty("type");
 
     await Promise.all([
       service.patchTenant(
@@ -239,10 +236,9 @@ describe("Tenant service integration", () => {
     ).resolves.toMatchObject({
       settings: { loginCaptchaRequired: false },
     });
-    const listed = await service.listTenants(adminScope, 100, 0, "/v1/tenants");
+    const listed = await service.listTenants(adminScope, 100, 0);
     expect(
-      listed.data.find(({ id }) => id === disabledTenant.id)?.attributes
-        .settings
+      listed.data.find(({ id }) => id === disabledTenant.id)?.settings
     ).toEqual({ loginCaptchaRequired: false });
 
     const requiredTenant = await createTenant("captcha-required");
@@ -497,12 +493,7 @@ describe("Tenant service integration", () => {
     await expect(
       service.batchGet(firstScope, [first.id, second.id])
     ).resolves.toEqual([first]);
-    const firstList = await service.listAccounts(
-      firstScope,
-      100,
-      0,
-      "/v1/accounts"
-    );
+    const firstList = await service.listAccounts(firstScope, 100, 0);
     expect(firstList.data.map(({ id }) => id)).toContain(first.id);
     expect(firstList.data.map(({ id }) => id)).not.toContain(second.id);
     await expect(
