@@ -177,8 +177,7 @@ describe("Account management API", () => {
       "GET",
       { service: true }
     );
-    const beforeTotal = (before.body as { meta: { page: { total: number } } })
-      .meta.page.total;
+    const beforeTotal = (before.body as { meta: { total: number } }).meta.total;
 
     const first = await createAccount({
       password: "list-password",
@@ -191,16 +190,16 @@ describe("Account management API", () => {
       { service: true }
     );
     const collection = after.body as {
-      data: Array<{ attributes: Account; id: string; type: string }>;
-      links: { next?: string; self: string };
-      meta: { page: { limit: number; offset: number; total: number } };
+      data: Account[];
+      meta: { limit: number; offset: number; total: number };
     };
     expect(after.status).toBe(200);
-    expect(collection.data[0]?.type).toBe("accounts");
-    expect(collection.links.self).toContain("page[offset]=0");
-    expect(collection.links.next).toBeDefined();
-    expect(collection.meta.page).toMatchObject({ limit: 1, offset: 0 });
-    expect(collection.meta.page.total - beforeTotal).toBe(1);
+    expect(collection.data[0]).toHaveProperty("username");
+    expect(collection.data[0]).not.toHaveProperty("type");
+    expect(collection.data[0]).not.toHaveProperty("attributes");
+    expect(collection).not.toHaveProperty("links");
+    expect(collection.meta).toMatchObject({ limit: 1, offset: 0 });
+    expect(collection.meta.total - beforeTotal).toBe(1);
 
     const invalidPages = [
       "page[offset]=-1&page[limit]=10",
@@ -283,10 +282,10 @@ describe("Account management API", () => {
       );
       const pageBody = page.body as {
         data: Array<{ id: string }>;
-        links: { next?: string };
+        meta: { total: number };
       };
       visibleIds.push(...pageBody.data.map(({ id }) => id));
-      if (!pageBody.links.next) {
+      if (offset + pageBody.data.length >= pageBody.meta.total) {
         reachedLastPage = true;
         break;
       }

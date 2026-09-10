@@ -15,6 +15,7 @@ export type {
   AdminScope,
   AuthTokens,
   Captcha,
+  CollectionMeta,
   CreatedTenantApiKey,
   HealthCheck,
   LoginInput,

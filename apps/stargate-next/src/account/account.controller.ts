@@ -66,7 +66,7 @@ export class AccountController {
       tenantHeader(request)
     );
     const { limit, offset } = parsePage(offsetValue, limitValue);
-    return this.service.listAccounts(scope, limit, offset, "/v1/accounts");
+    return this.service.listAccounts(scope, limit, offset);
   }
 
   @Post("@batchGet")

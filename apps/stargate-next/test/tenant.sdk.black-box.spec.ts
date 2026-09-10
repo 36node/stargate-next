@@ -33,9 +33,9 @@ describe("Given the multi-tenant generated SDK", () => {
       settings: { loginCaptchaRequired: false },
     });
     const listed = await admin.listTenants(0, 100, "SDK Captcha Settings");
-    expect(
-      listed.data.find(({ id }) => id === tenantId)?.attributes.settings
-    ).toEqual({ loginCaptchaRequired: false });
+    expect(listed.data.find(({ id }) => id === tenantId)?.settings).toEqual({
+      loginCaptchaRequired: false,
+    });
 
     const account = await admin.createAccount({
       password: "sdk-captcha-password",

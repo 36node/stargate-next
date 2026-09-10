@@ -1,5 +1,13 @@
 # Changelog
 
+
+## 2.0.0 (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* flatten paginated Account, Tenant, and Tenant API Key response types and expose pagination metadata directly under `meta`
+
 ## [1.2.1](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v1.2.0...stargate-next-sdk-v1.2.1) (2026-09-09)
 
 

@@ -40,7 +40,7 @@ describe("Account management SDK", () => {
 
     const listed = await client.listAccounts(0, 100);
     expect(listed.data.some(({ id }) => id === account.id)).toBe(true);
-    expect(listed.meta.page.total).toBeGreaterThan(0);
+    expect(listed.meta.total).toBeGreaterThan(0);
     expect((await client.getAccount(account.id)).id).toBe(account.id);
     expect(
       (await client.batchGetAccounts([account.id, "missing-account"])).map(

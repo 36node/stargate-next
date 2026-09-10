@@ -40,6 +40,9 @@ const client = new StargateNextClient(endpoint, {
 
 const accounts = await client.listAccounts();
 const defaultAccounts = await client.listAccounts(0, 10, "default");
+
+accounts.data[0]?.username;
+accounts.meta.total;
 ```
 
 Tenant 控制面方法 `createTenant`、`listTenants`、`getTenant`、`patchTenant` 只接受 Admin Key，永远不会发送 `x-tenant-id`。Tenant API Key 管理方法属于 Tenant-scoped API：

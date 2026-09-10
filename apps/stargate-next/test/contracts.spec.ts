@@ -146,4 +146,51 @@ describe("service contracts", () => {
       "newPassword",
     ]);
   });
+
+  it("publishes flat paginated collection schemas", () => {
+    const specification = JSON.parse(
+      readFileSync(resolve(process.cwd(), "openapi.json"), "utf8")
+    ) as {
+      components: {
+        responses: Record<
+          string,
+          { content?: Record<string, unknown>; description: string }
+        >;
+        schemas: Record<
+          string,
+          {
+            properties?: {
+              data?: { items?: { $ref?: string } };
+              meta?: { properties?: Record<string, unknown> };
+            };
+            required?: string[];
+          }
+        >;
+      };
+    };
+    const collections = [
+      ["AccountCollection", "Account"],
+      ["TenantCollection", "Tenant"],
+      ["TenantApiKeyCollection", "TenantApiKey"],
+    ] as const;
+
+    for (const [collectionName, resourceName] of collections) {
+      const schema = specification.components.schemas[collectionName];
+      expect(schema?.required).toEqual(["data", "meta"]);
+      expect(Object.keys(schema?.properties ?? {})).toEqual(["data", "meta"]);
+      expect(schema?.properties?.data?.items?.$ref).toBe(
+        `#/components/schemas/${resourceName}`
+      );
+      expect(Object.keys(schema?.properties?.meta?.properties ?? {})).toEqual([
+        "offset",
+        "limit",
+        "total",
+      ]);
+      expect(
+        Object.keys(
+          specification.components.responses[collectionName]?.content ?? {}
+        )
+      ).toEqual(["application/json"]);
+    }
+  });
 });

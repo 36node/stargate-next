@@ -923,9 +923,11 @@ jobs:
                 echo "::error::List $tenant accounts failed with HTTP $status"
                 exit 1
               fi
-              account_id="$(jq -r '.data[] | select(.attributes.username == "stargate") | .id' "$response_file" | head -n 1)"
+              account_id="$(jq -r '.data[] | select(.username == "stargate") | .id' "$response_file" | head -n 1)"
               [ -n "$account_id" ] && break
-              [ "$(jq -r '.links.next // empty' "$response_file")" = "" ] && break
+              page_count="$(jq -r '.data | length' "$response_file")"
+              page_total="$(jq -r '.meta.total' "$response_file")"
+              [ "$((offset + page_count))" -ge "$page_total" ] && break
             done
             if [ -z "$account_id" ]; then
               rm -f "$response_file"

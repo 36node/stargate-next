@@ -66,10 +66,15 @@ export type PublicAccount = {
   username: string;
 };
 
+export type CollectionMeta = {
+  limit: number;
+  offset: number;
+  total: number;
+};
+
 export type AccountCollection = {
-  data: Array<{ attributes: PublicAccount; id: string; type: "accounts" }>;
-  links: { self: string; next?: string };
-  meta: { page: { limit: number; offset: number; total: number } };
+  data: PublicAccount[];
+  meta: CollectionMeta;
 };
 
 export type AuthTokens = {
@@ -121,9 +126,8 @@ export type TenantPatchInput = {
 };
 
 export type TenantCollection = {
-  data: Array<{ attributes: PublicTenant; id: string; type: "tenants" }>;
-  links: { self: string; next?: string };
-  meta: { page: { limit: number; offset: number; total: number } };
+  data: PublicTenant[];
+  meta: CollectionMeta;
 };
 
 export type PublicTenantApiKey = {
@@ -140,13 +144,8 @@ export type TenantApiKeyInput = { name?: string | null };
 export type TenantApiKeyPatchInput = { name: string | null };
 
 export type TenantApiKeyCollection = {
-  data: Array<{
-    attributes: PublicTenantApiKey;
-    id: string;
-    type: "tenant-api-keys";
-  }>;
-  links: { self: string; next?: string };
-  meta: { page: { limit: number; offset: number; total: number } };
+  data: PublicTenantApiKey[];
+  meta: CollectionMeta;
 };
 
 export type StargateErrorCategory =
@@ -217,7 +216,6 @@ export type StargateServiceContract = {
     scope: AdminScope,
     limit: number,
     offset: number,
-    basePath: string,
     name?: string
   ): Promise<TenantCollection>;
   patchTenant(
@@ -235,8 +233,7 @@ export type StargateServiceContract = {
   listTenantApiKeys(
     scope: TenantScope,
     limit: number,
-    offset: number,
-    basePath: string
+    offset: number
   ): Promise<TenantApiKeyCollection>;
   patchTenantApiKey(
     scope: TenantScope,
@@ -294,8 +291,7 @@ export type StargateServiceContract = {
   listAccounts(
     scope: TenantScope,
     limit: number,
-    offset: number,
-    basePath: string
+    offset: number
   ): Promise<AccountCollection>;
   patchAccount(
     scope: TenantScope,

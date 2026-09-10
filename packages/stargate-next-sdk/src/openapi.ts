@@ -390,22 +390,11 @@ export interface components {
             updatedAt: string;
         };
         AccountCollection: {
-            data: {
-                /** @constant */
-                type: "accounts";
-                id: string;
-                attributes: components["schemas"]["Account"];
-            }[];
-            links: {
-                self: string;
-                next?: string;
-            };
+            data: components["schemas"]["Account"][];
             meta: {
-                page: {
-                    offset: number;
-                    limit: number;
-                    total: number;
-                };
+                offset: number;
+                limit: number;
+                total: number;
             };
         };
         Tenant: {
@@ -437,22 +426,11 @@ export interface components {
             };
         };
         TenantCollection: {
-            data: {
-                /** @constant */
-                type: "tenants";
-                id: string;
-                attributes: components["schemas"]["Tenant"];
-            }[];
-            links: {
-                self: string;
-                next?: string;
-            };
+            data: components["schemas"]["Tenant"][];
             meta: {
-                page: {
-                    offset: number;
-                    limit: number;
-                    total: number;
-                };
+                offset: number;
+                limit: number;
+                total: number;
             };
         };
         TenantApiKey: {
@@ -483,22 +461,11 @@ export interface components {
             name: string | null;
         };
         TenantApiKeyCollection: {
-            data: {
-                /** @constant */
-                type: "tenant-api-keys";
-                id: string;
-                attributes: components["schemas"]["TenantApiKey"];
-            }[];
-            links: {
-                self: string;
-                next?: string;
-            };
+            data: components["schemas"]["TenantApiKey"][];
             meta: {
-                page: {
-                    offset: number;
-                    limit: number;
-                    total: number;
-                };
+                offset: number;
+                limit: number;
+                total: number;
             };
         };
     };
@@ -552,13 +519,12 @@ export interface components {
                 "application/json": components["schemas"]["Session"][];
             };
         };
-        /** @description JSON:API account collection */
+        /** @description Flat account collection with pagination metadata */
         AccountCollection: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/vnd.api+json": components["schemas"]["AccountCollection"];
                 "application/json": components["schemas"]["AccountCollection"];
             };
         };
@@ -571,13 +537,12 @@ export interface components {
                 "application/json": components["schemas"]["Tenant"];
             };
         };
-        /** @description JSON:API tenant collection */
+        /** @description Flat tenant collection with pagination metadata */
         TenantCollection: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/vnd.api+json": components["schemas"]["TenantCollection"];
                 "application/json": components["schemas"]["TenantCollection"];
             };
         };
@@ -599,13 +564,12 @@ export interface components {
                 "application/json": components["schemas"]["CreatedTenantApiKey"];
             };
         };
-        /** @description JSON:API Tenant API key collection */
+        /** @description Flat Tenant API key collection with pagination metadata */
         TenantApiKeyCollection: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/vnd.api+json": components["schemas"]["TenantApiKeyCollection"];
                 "application/json": components["schemas"]["TenantApiKeyCollection"];
             };
         };
