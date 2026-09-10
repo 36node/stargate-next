@@ -1,12 +1,5 @@
 # Changelog
 
-## [2.0.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v1.2.0...stargate-next-v2.0.0) (2026-09-10)
-
-
-### ⚠ BREAKING CHANGES
-
-* **stargate-next:** flatten paginated Account, Tenant, and Tenant API Key responses and expose pagination metadata directly under `meta`
-
 ## [1.2.0](https://github.com/36node-mekong/stargate-next/compare/stargate-next-v1.1.0...stargate-next-v1.2.0) (2026-09-03)
 
 

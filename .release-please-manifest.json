@@ -1,6 +1,6 @@
 {
-  "apps/stargate-next": "2.0.0",
-  "apps/playground": "1.2.0",
+  "apps/stargate-next": "1.2.1",
+  "apps/playground": "1.2.1",
   "packages/db": "1.2.0",
-  "packages/stargate-next-sdk": "2.0.0"
+  "packages/stargate-next-sdk": "1.2.1"
 }
