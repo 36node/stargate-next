@@ -51,7 +51,7 @@ jobs:
             --arg pr_url "$PR_URL" \
             '{
               zh_cn: {
-                title: "stargate-next 新的合并请求",
+                title: "stargate-next 新的合并请求 #\($pr_number)",
                 content: [[{
                   tag: "a",
                   text: "\($pr_title) #\($pr_number)",
