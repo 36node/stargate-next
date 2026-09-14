@@ -43,12 +43,14 @@ jobs:
           set -euo pipefail
 
           short_sha="${HEAD_SHA:0:7}"
+          commit_subject="$(git log -1 --format=%s "$HEAD_SHA")"
           post_content="$(jq -cn \
-            --arg commit_url "$COMMIT_URL" \
             --arg short_sha "$short_sha" \
+            --arg commit_subject "$commit_subject" \
+            --arg commit_url "$COMMIT_URL" \
             '{
               zh_cn: {
-                title: "stargate-next main 分支已更新",
+                title: "stargate-next main 分支已更新 #\($short_sha)",
                 content: [[
                   {
                     tag: "text",
