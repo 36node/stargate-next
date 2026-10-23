@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v2.1.0...stargate-next-sdk-v2.2.0) (2026-10-23)
+
+
+### Features
+
+* unify API key permissions for login captcha exemption ([a3cf431](https://github.com/36node/stargate-next/commit/a3cf4314aa93cc8117efbb44f1bfe29005c7f4d4))
+
 ## [2.1.0](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v2.0.0...stargate-next-sdk-v2.1.0) (2026-10-23)
 
 
