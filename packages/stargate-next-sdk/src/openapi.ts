@@ -77,6 +77,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** @description Authenticates an account password. options.skipCaptcha=true requires a valid database-managed Tenant API Key in x-api-key; Admin and Service keys cannot authorize this exemption. The key selects its own Tenant when x-tenant-id is omitted; an explicit Tenant must match. Authorized exemption ignores captcha fields, while retaining account checks and the shared login lock. Without explicit exemption, the API key is ignored and existing Tenant captcha settings apply. */
         post: operations["login"];
         delete?: never;
         options?: never;
@@ -311,9 +312,14 @@ export interface components {
     schemas: {
         /** @enum {string} */
         ErrorCode: "ACCESS_TOKEN_INVALID" | "ACCOUNT_IDENTIFIER_CONFLICT" | "ACCOUNT_NOT_FOUND" | "API_KEY_INVALID" | "BATCH_INVALID" | "BODY_INVALID" | "CAPTCHA_CODE_INVALID" | "CAPTCHA_ID_INVALID" | "CAPTCHA_INVALID" | "CAPTCHA_RATE_LIMITED" | "CURRENT_PASSWORD_INVALID" | "EMAIL_INVALID" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "LOGIN_IDENTIFIER_INVALID" | "LOGIN_INVALID" | "LOGIN_LOCKED" | "PAGE_INVALID" | "PASSWORD_CHANGE_LOCKED" | "PASSWORD_INVALID" | "PATCH_INVALID" | "PHONE_INVALID" | "REFRESH_INVALID" | "REFRESH_KEY_INVALID" | "TENANT_ALREADY_EXISTS" | "TENANT_API_KEY_NOT_FOUND" | "TENANT_API_KEY_SELF_DELETE" | "TENANT_DISABLED" | "TENANT_ID_INVALID" | "TENANT_INVALID" | "TENANT_NOT_FOUND" | "USERNAME_INVALID";
+        LoginOptions: {
+            /** @description Explicitly requests captcha exemption authorized by a Tenant API Key. Omitted or false uses the Tenant captcha setting. */
+            skipCaptcha?: boolean;
+        };
         LoginInput: {
             login: string;
             password: string;
+            options?: components["schemas"]["LoginOptions"];
             captchaId?: string;
             /** @description Four characters from the case-insensitive captcha alphabet. */
             captchaCode?: string;
@@ -748,6 +754,8 @@ export interface operations {
             header?: {
                 /** @description Target tenant id. Omitted means the built-in `default` tenant. */
                 "x-tenant-id"?: components["parameters"]["TenantHeader"];
+                /** @description Tenant API Key, required only when options.skipCaptcha is true. */
+                "x-api-key"?: string;
             };
             path?: never;
             cookie?: never;

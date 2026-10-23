@@ -45,7 +45,17 @@
     "/v1/auth/login": {
       "post": {
         "operationId": "login",
-        "parameters": [{ "$ref": "#/components/parameters/TenantHeader" }],
+        "description": "Authenticates an account password. options.skipCaptcha=true requires a valid database-managed Tenant API Key in x-api-key; Admin and Service keys cannot authorize this exemption. The key selects its own Tenant when x-tenant-id is omitted; an explicit Tenant must match. Authorized exemption ignores captcha fields, while retaining account checks and the shared login lock. Without explicit exemption, the API key is ignored and existing Tenant captcha settings apply.",
+        "parameters": [
+          { "$ref": "#/components/parameters/TenantHeader" },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "description": "Tenant API Key, required only when options.skipCaptcha is true.",
+            "schema": { "type": "string" }
+          }
+        ],
         "requestBody": { "$ref": "#/components/requestBodies/Login" },
         "responses": {
           "200": { "$ref": "#/components/responses/AuthTokens" },
@@ -572,12 +582,23 @@
           "USERNAME_INVALID"
         ]
       },
+      "LoginOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "skipCaptcha": {
+            "type": "boolean",
+            "description": "Explicitly requests captcha exemption authorized by a Tenant API Key. Omitted or false uses the Tenant captcha setting."
+          }
+        }
+      },
       "LoginInput": {
         "type": "object",
         "required": ["login", "password"],
         "properties": {
           "login": { "type": "string" },
           "password": { "type": "string", "writeOnly": true },
+          "options": { "$ref": "#/components/schemas/LoginOptions" },
           "captchaId": { "type": "string" },
           "captchaCode": {
             "type": "string",

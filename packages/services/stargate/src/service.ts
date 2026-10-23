@@ -38,6 +38,7 @@ import type {
   CreatedTenantApiKey,
   HealthCheck,
   LoginInput,
+  LoginOptions,
   PublicAccount,
   PublicTenant,
   PublicTenantApiKey,
@@ -159,6 +160,70 @@ function requiredString(
     throw serviceError(code, message, "invalid_argument");
   }
   return value;
+}
+
+function loginOptions(value: unknown): LoginOptions {
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.keys(value).some((key) => key !== "skipCaptcha") ||
+    ("skipCaptcha" in value && typeof value.skipCaptcha !== "boolean")
+  ) {
+    throw serviceError(
+      "BODY_INVALID",
+      "invalid login options",
+      "invalid_argument"
+    );
+  }
+  return value as LoginOptions;
+}
+
+function loginRequest(rawBody: unknown) {
+  const body = (
+    typeof rawBody === "object" && rawBody !== null ? rawBody : {}
+  ) as Record<string, unknown>;
+  return { body, options: loginOptions(body.options) };
+}
+
+function loginInput(
+  body: Record<string, unknown>,
+  skipCaptcha: boolean
+): LoginInput {
+  return {
+    ...(!skipCaptcha && body.captchaCode !== undefined
+      ? {
+          captchaCode: requiredString(
+            body.captchaCode,
+            "CAPTCHA_CODE_INVALID",
+            "captcha code is required"
+          ),
+        }
+      : {}),
+    ...(!skipCaptcha && body.captchaId !== undefined
+      ? {
+          captchaId: requiredString(
+            body.captchaId,
+            "CAPTCHA_ID_INVALID",
+            "captcha id is required"
+          ),
+        }
+      : {}),
+    login: requiredString(
+      body.login,
+      "LOGIN_IDENTIFIER_INVALID",
+      "login is required"
+    ),
+    password: requiredString(
+      body.password,
+      "PASSWORD_INVALID",
+      "password is required"
+    ),
+  };
 }
 
 function allowedKeysOnly(body: Record<string, unknown>, keys: string[]): void {
@@ -1232,23 +1297,60 @@ export class StargateService implements StargateServiceContract {
     });
   }
 
+  private async captchaBypassTenant(
+    apiKey: string | undefined,
+    tenantHeader: string | undefined
+  ): Promise<{ tenant: Tenant; keyId: string }> {
+    if (
+      !apiKey ||
+      this.constantTimeEquals(apiKey, this.settings.adminApiKey) ||
+      this.constantTimeEquals(apiKey, this.settings.apiKey)
+    ) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid API key",
+        "unauthenticated"
+      );
+    }
+    const key = await this.findTenantApiKey(apiKey);
+    if (!key) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid API key",
+        "unauthenticated"
+      );
+    }
+    const requested = this.parseCredentialTenantHeader(tenantHeader);
+    if (requested !== undefined && requested !== key.tenantId) {
+      throw serviceError(
+        "API_KEY_INVALID",
+        "invalid API key",
+        "unauthenticated"
+      );
+    }
+    return {
+      keyId: key.id,
+      tenant: await this.requireActiveTenant(key.tenantId),
+    };
+  }
+
   async login(
     tenantHeader: string | undefined,
-    input: LoginInput,
-    context: RequestContext
+    rawBody: unknown,
+    context: RequestContext,
+    apiKey?: string
   ): Promise<AuthTokens> {
-    const tenant = await this.resolvePublicTenant(
-      tenantHeader,
-      "LOGIN_INVALID"
-    );
+    const { body, options } = loginRequest(rawBody);
+    const bypass =
+      options.skipCaptcha === true
+        ? await this.captchaBypassTenant(apiKey, tenantHeader)
+        : undefined;
+    const input = loginInput(body, bypass !== undefined);
+    const tenant =
+      bypass?.tenant ??
+      (await this.resolvePublicTenant(tenantHeader, "LOGIN_INVALID"));
     const tenantId = tenant.id;
-    const rawLogin = requiredString(
-      input.login,
-      "LOGIN_IDENTIFIER_INVALID",
-      "login is required"
-    ).trim();
-    const normalizedLogin = this.normalizeLoginForLookup(rawLogin);
-    requiredString(input.password, "PASSWORD_INVALID", "password is required");
+    const normalizedLogin = this.normalizeLoginForLookup(input.login.trim());
     const failureKey = this.redisKey(
       LOGIN_FAILURE_PREFIX,
       tenantId,
@@ -1264,7 +1366,7 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    if (tenantSettingsRequiresCaptcha(tenant.settings)) {
+    if (!bypass && tenantSettingsRequiresCaptcha(tenant.settings)) {
       if (input.captchaCode === undefined) {
         throw serviceError(
           "CAPTCHA_CODE_INVALID",
@@ -1311,7 +1413,10 @@ export class StargateService implements StargateServiceContract {
       account.deletedAt ||
       !verifyPassword(account.passwordHash, input.password)
     ) {
-      await this.loginFailure(failureKey, tenantId, context, account?.id);
+      await this.loginFailure(failureKey, tenantId, context, {
+        accountId: account?.id,
+        tenantKeyId: bypass?.keyId,
+      });
       throw serviceError(
         "LOGIN_INVALID",
         "invalid login or password",
@@ -1341,8 +1446,7 @@ export class StargateService implements StargateServiceContract {
     });
     await this.audit({
       accountId: account.id,
-      actorId: account.id,
-      actorType: "account",
+      ...this.loginAuditActor(account.id, bypass?.keyId),
       context,
       eventType: "login",
       sessionId: session.id,
@@ -1364,7 +1468,10 @@ export class StargateService implements StargateServiceContract {
     key: string,
     tenantId: string,
     context: RequestContext,
-    accountId?: string
+    {
+      accountId,
+      tenantKeyId,
+    }: { accountId?: string; tenantKeyId?: string } = {}
   ): Promise<void> {
     await withRedisTimeout(
       getRedisClient().eval(
@@ -1377,13 +1484,29 @@ export class StargateService implements StargateServiceContract {
     );
     await this.audit({
       accountId,
-      actorId: accountId,
-      actorType: accountId ? "account" : "anonymous",
+      ...this.loginAuditActor(accountId, tenantKeyId),
       context,
       eventType: "login",
       success: false,
       tenantId,
     });
+  }
+
+  private loginAuditActor(
+    accountId?: string,
+    tenantKeyId?: string
+  ): Pick<AuditInput, "actorId" | "actorType" | "metadata"> {
+    if (tenantKeyId) {
+      return {
+        actorId: tenantKeyId,
+        actorType: "tenant_key",
+        metadata: { method: "tenant_api_key" },
+      };
+    }
+    return {
+      actorId: accountId,
+      actorType: accountId ? "account" : "anonymous",
+    };
   }
 
   private normalizeLogin(rawLogin: string): string {

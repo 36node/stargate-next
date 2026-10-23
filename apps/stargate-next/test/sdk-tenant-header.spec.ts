@@ -4,6 +4,62 @@ import { StargateNextClient } from "@36node/stargate-next-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 describe("StargateNextClient Tenant headers", () => {
+  it("sends the configured key only for explicit login exemption", async () => {
+    const requests: Request[] = [];
+    const fetchImpl = vi.fn(
+      (input: string | URL | Request, init?: RequestInit) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(
+          Response.json({ accountId: "account", tenantId: "test" })
+        );
+      }
+    );
+    const client = new StargateNextClient("https://stargate.example", {
+      apiKey: "tenant-key",
+      fetch: fetchImpl as typeof fetch,
+      tenantId: "test",
+    });
+    await client.login("alice", "password", "captcha", "ABCD");
+    await client.login(
+      "alice",
+      "password",
+      undefined,
+      undefined,
+      undefined,
+      {}
+    );
+    await client.login("alice", "password", undefined, undefined, undefined, {
+      skipCaptcha: false,
+    });
+    await client.login("alice", "password", undefined, undefined, "other", {
+      skipCaptcha: true,
+    });
+    const noKey = new StargateNextClient("https://stargate.example", {
+      fetch: fetchImpl as typeof fetch,
+    });
+    await noKey.login("alice", "password", undefined, undefined, undefined, {
+      skipCaptcha: true,
+    });
+
+    expect(requests.map((request) => request.headers.get("x-api-key"))).toEqual(
+      [null, null, null, "tenant-key", null]
+    );
+    expect(
+      requests.map((request) => request.headers.get("x-tenant-id"))
+    ).toEqual(["test", "test", "test", "other", null]);
+    expect(await requests[0].json()).toEqual({
+      login: "alice",
+      password: "password",
+      captchaId: "captcha",
+      captchaCode: "ABCD",
+    });
+    expect(await requests[3].json()).toEqual({
+      login: "alice",
+      password: "password",
+      options: { skipCaptcha: true },
+    });
+  });
+
   it("keeps API keys off Bearer self-change requests", async () => {
     const fetchImpl = vi.fn(
       (input: string | URL | Request, init?: RequestInit) => {

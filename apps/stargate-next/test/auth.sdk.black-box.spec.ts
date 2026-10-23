@@ -61,6 +61,74 @@ async function expectApiError(
 }
 
 describe("authentication SDK", () => {
+  it("uses the sixth login argument with a Tenant key and preserves sessions after key deletion", async () => {
+    const tenantId = `sdk-bypass-${uniqueUsername()}`;
+    const admin = new StargateNextClient(endpoint, {
+      apiKey: env("STARGATE_ADMIN_API_KEY"),
+    });
+    await admin.createTenant({ id: tenantId });
+    const created = await admin.createAccount(
+      { username: uniqueUsername(), password: "sdk-bypass-password" },
+      tenantId
+    );
+    const key = await admin.createTenantApiKey(undefined, tenantId);
+    const tenant = new StargateNextClient(endpoint, { apiKey: key.key });
+    await expectApiError(
+      tenant.login(
+        created.username,
+        "sdk-bypass-password",
+        undefined,
+        undefined,
+        tenantId
+      ),
+      400,
+      "CAPTCHA_CODE_INVALID"
+    );
+    const tokens = await tenant.login(
+      created.username,
+      "sdk-bypass-password",
+      undefined,
+      undefined,
+      undefined,
+      { skipCaptcha: true }
+    );
+    expect(tokens).toMatchObject({ accountId: created.id, tenantId });
+    await admin.deleteTenantApiKey(key.id, tenantId);
+    await expectApiError(
+      tenant.login(
+        created.username,
+        "sdk-bypass-password",
+        undefined,
+        undefined,
+        undefined,
+        { skipCaptcha: true }
+      ),
+      401,
+      "API_KEY_INVALID"
+    );
+    await expect(
+      tenant.refresh(tokens.refreshKey, tenantId)
+    ).resolves.toMatchObject({ sessionId: tokens.sessionId });
+    await admin.revokeSessions(created.id, tokens.sessionId, tenantId);
+    await expectApiError(
+      tenant.refresh(tokens.refreshKey, tenantId),
+      401,
+      "REFRESH_INVALID"
+    );
+    await expectApiError(
+      new StargateNextClient(endpoint).login(
+        created.username,
+        "sdk-bypass-password",
+        undefined,
+        undefined,
+        undefined,
+        { skipCaptcha: true }
+      ),
+      401,
+      "API_KEY_INVALID"
+    );
+  });
+
   it("changes a password with Bearer auth and no API key", async () => {
     const adminSdk = client("203.0.113.15");
     const created = await account(adminSdk, "sdk-self-change-password");

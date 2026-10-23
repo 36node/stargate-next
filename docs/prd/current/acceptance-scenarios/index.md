@@ -372,3 +372,68 @@
 
 - Tenant 服务集成测试覆盖创建、更新、恢复默认、非法设置、响应形态，以及纯 settings 与混合 status 更新的审计边界。
 - OpenAPI 与生成 SDK 的 Tenant 类型均包含 `settings.loginCaptchaRequired?: boolean`。
+
+### Tenant Key 授权单次登录验证码豁免
+
+此场景源自 [202610-01 Tenant API Key 授权跳过登录验证码](../../features/202610-01-tenant-api-key-login.md)。
+
+**关联规范**
+
+- [产品模型：登录并加载业务权限](../product-domain-model/product-model.md)
+- [领域概念：Authentication Service](../product-domain-model/domain-concepts.md)
+- [OpenAPI](../../../../apps/stargate-next/openapi.json)：`POST /v1/auth/login`（`login`）
+- [服务集成测试](../../../../packages/services/stargate/test/login-captcha-bypass.integration.spec.ts)、[API 黑盒测试](../../../../apps/stargate-next/test/login-captcha-bypass.api.black-box.spec.ts)、[SDK 黑盒测试](../../../../apps/stargate-next/test/auth.sdk.black-box.spec.ts)
+
+**Given**
+
+- 一个要求登录 Captcha 的 active Tenant，其中存在可密码认证的 Account。
+- 可信后端持有该 Tenant 的有效 Tenant API Key。
+
+**When**
+
+- 通过现有 Login API 提交正确账号密码、`options: { skipCaptcha: true }` 和 `x-api-key`。
+- 分别省略 Tenant header、显式提供匹配 header，并使用 username、phone、email 登录。
+
+**Then**
+
+- 使用 Key 所属 Tenant，忽略且不消费 Captcha 字段，创建普通用户 Session 并返回既有 AuthTokens。
+- 即使提供非法 Captcha 字段也不参与校验；Tenant 设置不变。
+- 审计事件为 `login`，actor 为 `tenant_key` 与 Key ID，目标 Account 单独记录，metadata 为 `{ method: "tenant_api_key" }`。
+- Session 与 Token 的有效期、Refresh、Logout 和撤销语义保持一致；删除 Key 只拒绝后续豁免，不额外撤销已有 Session。
+
+### 验证码豁免必须显式请求并通过凭证验证
+
+**Given**
+
+- 调用方尝试在 Login 请求中省略 Captcha。
+
+**When**
+
+- 不请求豁免，或提交非法 options、无效 Key、Admin Key、Service Key、跨租户 header，或仅携带 Bearer Token。
+- 目标 Tenant 已关闭验证码，但仍显式请求豁免并使用无效 Key。
+
+**Then**
+
+- 未请求豁免时忽略 API Key，继续使用公开登录的默认租户和 Tenant 验证码设置；仅携带有效 Key 不能豁免。
+- 非法 options 返回 `BODY_INVALID`；仅接受对象与 boolean `skipCaptcha`，拒绝未知选项。
+- 请求豁免时先验证 Tenant Key 再验证账号字段；Key 缺失、无效、已删除或越权返回 `API_KEY_INVALID`，不降级为普通登录。
+- Key 合法但 Tenant header 格式非法返回 `TENANT_INVALID`，所属 Tenant 停用返回 `TENANT_DISABLED`。
+- 关闭验证码不会免除显式豁免请求的 Key 校验；错误请求不产生 Session 或密码失败计数。
+
+### 普通登录与豁免登录共享失败锁定
+
+**Given**
+
+- 同一 Tenant 内一个账户可被多把合法 Tenant Key 授权登录，另一 Tenant 有同名账户。
+
+**When**
+
+- 交替使用普通登录与豁免登录提交错误密码，普通登录使用有效 Captcha。
+- 达到阈值后更换 Key 并提交正确密码；在另一 Tenant 登录；锁定期结束后重新登录。
+
+**Then**
+
+- 失败按 Tenant 与规范化 login 共同累计；更换 Key 和登录方式均不能绕过 `LOGIN_LOCKED`。
+- 另一 Tenant 的登录不受影响；锁定期结束恢复登录，成功清除共享计数。
+- 账户不存在、禁用、删除、密码不可认证或错误均统一返回 `LOGIN_INVALID`，不创建 Session。
+- 获准豁免后的账号密码失败审计仍可追溯授权 Key，不包含任何秘密。

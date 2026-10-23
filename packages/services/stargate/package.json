@@ -12,7 +12,7 @@
     "seed:default-tenant": "DOTENV_CONFIG_PATH=../../../.env tsx scripts/seed-default-tenant.ts",
     "seed:legacy-fixture": "DOTENV_CONFIG_PATH=../../../.env tsx scripts/seed-legacy-fixture.ts",
     "test": "vitest run --exclude 'test/**/*.integration.spec.ts'",
-    "test:integration": "vitest run test/account.integration.spec.ts test/auth.integration.spec.ts test/tenant.integration.spec.ts test/tenant-api-key.integration.spec.ts test/redis-tenant.integration.spec.ts",
+    "test:integration": "vitest run test/account.integration.spec.ts test/auth.integration.spec.ts test/tenant.integration.spec.ts test/tenant-api-key.integration.spec.ts test/redis-tenant.integration.spec.ts test/login-captcha-bypass.integration.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

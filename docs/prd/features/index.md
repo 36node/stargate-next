@@ -19,3 +19,7 @@
 
 1. [202609-01 租户登录验证码配置](./202609-01-tenant-captcha-settings.md)
 2. [202609-02 查询 API 扁平响应](./202609-02-flat-query-responses.md)
+
+## 2026-10
+
+1. [202610-01 Tenant API Key 授权跳过登录验证码](./202610-01-tenant-api-key-login.md)

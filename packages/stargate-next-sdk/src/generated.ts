@@ -12,6 +12,8 @@ export type CreatedTenantApiKey =
   components["schemas"]["CreatedTenantApiKey"];
 export type CreateTenantInput = components["schemas"]["CreateTenantInput"];
 export type ErrorCode = components["schemas"]["ErrorCode"];
+export type LoginInput = components["schemas"]["LoginInput"];
+export type LoginOptions = components["schemas"]["LoginOptions"];
 export type PatchAccountInput = components["schemas"]["PatchAccountInput"];
 export type PatchTenantInput = components["schemas"]["PatchTenantInput"];
 export type SelfChangePasswordInput =
@@ -130,13 +132,16 @@ export class StargateNextClient {
     password: string,
     captchaId?: string,
     captchaCode?: string,
-    tenantId?: string
+    tenantId?: string,
+    options?: LoginOptions
   ) {
     return this.request<AuthTokens>("/v1/auth/login", "POST", {
+      apiKey: options?.skipCaptcha === true,
       body: {
         ...(captchaCode === undefined ? {} : { captchaCode }),
         ...(captchaId === undefined ? {} : { captchaId }),
         login,
+        ...(options === undefined ? {} : { options }),
         password,
       },
       tenantId,

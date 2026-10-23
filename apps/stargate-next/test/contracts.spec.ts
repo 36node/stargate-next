@@ -9,6 +9,8 @@ import type {
   CreateAccountInput,
   CreatedTenantApiKey,
   CreateTenantInput,
+  LoginInput,
+  LoginOptions,
   PatchAccountInput,
   PatchTenantInput,
   ErrorCode as SdkErrorCode,
@@ -29,6 +31,8 @@ import type {
   AuthTokens as ServiceAuthTokens,
   Captcha as ServiceCaptcha,
   CreatedTenantApiKey as ServiceCreatedTenantApiKey,
+  LoginInput as ServiceLoginInput,
+  LoginOptions as ServiceLoginOptions,
   Session as ServiceSession,
   TenantApiKeyCollection as ServiceTenantApiKeyCollection,
   TenantCollection as ServiceTenantCollection,
@@ -50,6 +54,16 @@ type SameKeys<A, B> = [Exclude<keyof A, keyof B>] extends [never]
 
 type _PublicAccountMatchesApi = Assert<IsAssignable<PublicAccount, Account>>;
 type _TokensMatchApi = Assert<IsAssignable<ServiceAuthTokens, AuthTokens>>;
+type _LoginKeys = Assert<SameKeys<ServiceLoginInput, LoginInput>>;
+type _LoginServiceToApi = Assert<IsAssignable<ServiceLoginInput, LoginInput>>;
+type _LoginApiToService = Assert<IsAssignable<LoginInput, ServiceLoginInput>>;
+type _LoginOptionsKeys = Assert<SameKeys<ServiceLoginOptions, LoginOptions>>;
+type _LoginOptionsServiceToApi = Assert<
+  IsAssignable<ServiceLoginOptions, LoginOptions>
+>;
+type _LoginOptionsApiToService = Assert<
+  IsAssignable<LoginOptions, ServiceLoginOptions>
+>;
 type _CaptchaMatchesApi = Assert<IsAssignable<ServiceCaptcha, Captcha>>;
 type _SessionsMatchApi = Assert<IsAssignable<ServiceSession, Session>>;
 type _SessionKeys = Assert<SameKeys<ServiceSession, Session>>;
@@ -120,6 +134,27 @@ type _SelfChangePasswordInputKeys = Assert<
 >;
 
 describe("service contracts", () => {
+  it("publishes optional strict login options without requiring API keys for public login", () => {
+    const specification = JSON.parse(
+      readFileSync(resolve(process.cwd(), "openapi.json"), "utf8")
+    );
+    const schemas = specification.components.schemas;
+    expect(schemas.LoginOptions.additionalProperties).toBe(false);
+    expect(schemas.LoginOptions.properties).toEqual({
+      skipCaptcha: { type: "boolean", description: expect.any(String) },
+    });
+    expect(schemas.LoginInput.required).toEqual(["login", "password"]);
+    expect(schemas.LoginInput.properties.options).toEqual({
+      $ref: "#/components/schemas/LoginOptions",
+    });
+    const operation = specification.paths["/v1/auth/login"].post;
+    expect(operation.operationId).toBe("login");
+    expect(operation.security).toBeUndefined();
+    expect(operation.parameters).toContainEqual(
+      expect.objectContaining({ name: "x-api-key", required: false })
+    );
+  });
+
   it("are represented by the generated OpenAPI types", () => {
     expect(true).toBe(true);
   });

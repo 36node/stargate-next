@@ -75,48 +75,12 @@ export class SessionController {
 
   @Post("auth/login")
   @HttpCode(200)
-  login(
-    @Body() body: {
-      captchaCode?: unknown;
-      captchaId?: unknown;
-      login?: unknown;
-      password?: unknown;
-    },
-    @Req() request: Request
-  ) {
+  login(@Body() rawBody: unknown, @Req() request: Request) {
     return this.service.login(
       tenantHeader(request),
-      {
-        ...(body?.captchaCode !== undefined
-          ? {
-              captchaCode: requiredString(
-                body.captchaCode,
-                "CAPTCHA_CODE_INVALID",
-                "captcha code is required"
-              ),
-            }
-          : {}),
-        ...(body?.captchaId !== undefined
-          ? {
-              captchaId: requiredString(
-                body.captchaId,
-                "CAPTCHA_ID_INVALID",
-                "captcha id is required"
-              ),
-            }
-          : {}),
-        login: requiredString(
-          body?.login,
-          "LOGIN_IDENTIFIER_INVALID",
-          "login is required"
-        ),
-        password: requiredString(
-          body?.password,
-          "PASSWORD_INVALID",
-          "password is required"
-        ),
-      },
-      requestContext(request)
+      rawBody,
+      requestContext(request),
+      request.header("x-api-key")
     );
   }
 

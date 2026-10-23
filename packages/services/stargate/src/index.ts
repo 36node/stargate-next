@@ -19,6 +19,7 @@ export type {
   CreatedTenantApiKey,
   HealthCheck,
   LoginInput,
+  LoginOptions,
   PublicAccount,
   PublicTenant,
   PublicTenantApiKey,

@@ -48,10 +48,15 @@ export type AccountPatchInput = {
   username?: string;
 };
 
+export type LoginOptions = {
+  skipCaptcha?: boolean;
+};
+
 export type LoginInput = {
   captchaCode?: string;
   captchaId?: string;
   login: string;
+  options?: LoginOptions;
   password: string;
 };
 
@@ -257,8 +262,9 @@ export type StargateServiceContract = {
   ): Promise<boolean>;
   login(
     tenantHeader: string | undefined,
-    input: LoginInput,
-    context: RequestContext
+    rawBody: unknown,
+    context: RequestContext,
+    apiKey?: string
   ): Promise<AuthTokens>;
   refresh(
     tenantHeader: string | undefined,
