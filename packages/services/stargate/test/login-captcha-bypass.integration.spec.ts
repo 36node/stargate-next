@@ -15,7 +15,7 @@ const config = loadStargateConfig({
   CAPTCHA_TEST_CODE: "ABCD",
   CAPTCHA_TEST_MODE: "true",
   LOGIN_MAX_ATTEMPTS: "3",
-  LOGIN_LOCK_SECONDS: "1",
+  LOGIN_LOCK_SECONDS: "60",
   REFRESH_KEY_HMAC_PRIMARY_KEY_ID: "refresh",
   REFRESH_KEY_HMAC_PRIMARY_SECRET: `${prefix}-refresh`,
   REDIS_KEY_PREFIX: `${prefix}:`,
@@ -32,6 +32,7 @@ const skip = { skipCaptcha: true };
 let scopes: TenantScope[];
 let keys: CreatedTenantApiKey[];
 let sequence = 0;
+const defaultAccountIds: string[] = [];
 
 function context(operation = "login") {
   sequence += 1;
@@ -59,6 +60,21 @@ function failureKey(login: string, tenant = 0) {
   return `${prefix}:login-failure:${encodeURIComponent(tenantIds[tenant])}:${login}`;
 }
 
+async function defaultAccount() {
+  sequence += 1;
+  const scope = await service.resolveApiCredential(config.apiKey, undefined);
+  const created = await service.createAccount(
+    scope,
+    {
+      username: `${prefix}user${sequence}`,
+      password,
+    },
+    context("default-account")
+  );
+  defaultAccountIds.push(created.id);
+  return created;
+}
+
 beforeAll(async () => {
   for (const id of tenantIds) {
     await service.createTenant(admin, { id }, context("tenant"));
@@ -73,9 +89,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const where = { tenantId: { in: tenantIds } };
-  await db.account.deleteMany({ where });
+  await db.account.deleteMany({
+    where: { OR: [where, { id: { in: defaultAccountIds } }] },
+  });
   await db.tenantApiKey.deleteMany({ where });
-  await db.authAuditEvent.deleteMany({ where });
+  await db.authAuditEvent.deleteMany({
+    where: { OR: [where, { requestId: { startsWith: prefix } }] },
+  });
   await db.tenant.deleteMany({ where: { id: { in: tenantIds } } });
   const redis = getRedisClient();
   const redisKeys = await redis.keys(`${prefix}:*`);
@@ -86,7 +106,140 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-describe("Tenant Key captcha exemption", () => {
+describe("API Key captcha exemption", () => {
+  it.each([
+    { kind: "admin", header: undefined },
+    { kind: "admin", header: "default" },
+    { kind: "service", header: undefined },
+    { kind: "service", header: "default" },
+  ])("authenticates default Tenant using $kind with header $header and records its actor", async ({
+    kind,
+    header,
+  }) => {
+    const created = await defaultAccount();
+    const apiKey = kind === "admin" ? config.adminApiKey : config.apiKey;
+    const failureContext = context("password-failure");
+    await expect(
+      service.login(
+        header,
+        {
+          login: created.username,
+          password: "wrong",
+          options: skip,
+        },
+        failureContext,
+        apiKey
+      )
+    ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
+    const successContext = context("success");
+    const tokens = await service.login(
+      header,
+      {
+        login: created.username,
+        password,
+        options: skip,
+        captchaCode: null,
+        captchaId: [],
+      },
+      successContext,
+      apiKey
+    );
+    expect(tokens).toMatchObject({
+      accountId: created.id,
+      tenantId: "default",
+    });
+    expect(
+      service.accessTokenClaims(`Bearer ${tokens.accessToken}`)
+    ).toMatchObject({ tenantId: "default" });
+    for (const [requestContext, success] of [
+      [failureContext, false],
+      [successContext, true],
+    ] as const) {
+      const audit = await db.authAuditEvent.findFirstOrThrow({
+        where: { requestId: requestContext.requestId },
+      });
+      expect(audit).toMatchObject({
+        accountId: created.id,
+        actorType: kind,
+        actorId: null,
+        metadata: { method: `${kind}_api_key` },
+        tenantId: "default",
+        success,
+      });
+      expect(JSON.stringify(audit)).not.toContain(apiKey);
+      expect(JSON.stringify(audit)).not.toContain(password);
+    }
+    await expect(
+      service.refresh("default", tokens.refreshKey, context())
+    ).resolves.toMatchObject({ sessionId: tokens.sessionId });
+    await service.logout("default", `Bearer ${tokens.accessToken}`, context());
+    await expect(
+      service.refresh("default", tokens.refreshKey, context())
+    ).rejects.toMatchObject({ code: "REFRESH_INVALID" });
+  });
+
+  it("lets Admin choose a non-default Tenant while Service remains bound to default", async () => {
+    const created = await account();
+    const requestContext = context();
+    const tokens = await service.login(
+      tenantIds[0],
+      {
+        login: created.username,
+        password,
+        options: skip,
+      },
+      requestContext,
+      config.adminApiKey
+    );
+    expect(tokens).toMatchObject({
+      accountId: created.id,
+      tenantId: tenantIds[0],
+    });
+    expect(
+      await db.authAuditEvent.findFirstOrThrow({
+        where: { requestId: requestContext.requestId },
+      })
+    ).toMatchObject({
+      actorType: "admin",
+      actorId: null,
+      metadata: { method: "admin_api_key" },
+      tenantId: tenantIds[0],
+    });
+    const failureContext = context();
+    await expect(
+      service.login(
+        tenantIds[0],
+        { login: created.username, password: "wrong", options: skip },
+        failureContext,
+        config.adminApiKey
+      )
+    ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
+    expect(
+      await db.authAuditEvent.findFirstOrThrow({
+        where: { requestId: failureContext.requestId },
+      })
+    ).toMatchObject({
+      actorType: "admin",
+      actorId: null,
+      accountId: created.id,
+      metadata: { method: "admin_api_key" },
+      success: false,
+    });
+    for (const header of [tenantIds[0], "missing-tenant"]) {
+      await expect(
+        service.login(header, { options: skip }, context(), config.apiKey)
+      ).rejects.toMatchObject({ code: "API_KEY_INVALID" });
+    }
+    await expect(
+      service.login(
+        "missing-tenant",
+        { options: skip },
+        context(),
+        config.adminApiKey
+      )
+    ).rejects.toMatchObject({ code: "TENANT_INVALID" });
+  });
+
   it("authenticates each identifier, infers Tenant and records the key actor", async () => {
     const created = await account();
     for (const login of [
@@ -128,13 +281,8 @@ describe("Tenant Key captcha exemption", () => {
     expect((await service.getTenant(admin, tenantIds[0])).settings).toEqual({});
   });
 
-  it("rejects wrong credential classes and checks credentials before fields", async () => {
-    for (const key of [
-      undefined,
-      "invalid",
-      config.adminApiKey,
-      config.apiKey,
-    ]) {
+  it("rejects invalid credentials and checks credential scope before fields", async () => {
+    for (const key of [undefined, "invalid"]) {
       await expect(
         service.login(
           undefined,
@@ -149,10 +297,12 @@ describe("Tenant Key captcha exemption", () => {
         service.login(header, { options: skip }, context(), keys[0].key)
       ).rejects.toMatchObject({ code: "API_KEY_INVALID" });
     }
-    for (const header of ["", " ", "BAD", "a".repeat(64)]) {
-      await expect(
-        service.login(header, { options: skip }, context(), keys[0].key)
-      ).rejects.toMatchObject({ code: "TENANT_INVALID" });
+    for (const apiKey of [keys[0].key, config.adminApiKey, config.apiKey]) {
+      for (const header of ["", " ", "BAD", "a".repeat(64)]) {
+        await expect(
+          service.login(header, { options: skip }, context(), apiKey)
+        ).rejects.toMatchObject({ code: "TENANT_INVALID" });
+      }
     }
     await service.patchTenant(
       admin,
@@ -162,6 +312,14 @@ describe("Tenant Key captcha exemption", () => {
     );
     await expect(
       service.login(undefined, { options: skip }, context(), keys[1].key)
+    ).rejects.toMatchObject({ code: "TENANT_DISABLED" });
+    await expect(
+      service.login(
+        tenantIds[1],
+        { options: skip },
+        context(),
+        config.adminApiKey
+      )
     ).rejects.toMatchObject({ code: "TENANT_DISABLED" });
     await service.patchTenant(
       admin,
@@ -222,7 +380,12 @@ describe("Tenant Key captcha exemption", () => {
   it("preserves public login behavior and ignores captcha only after authorization", async () => {
     const created = await account();
     for (const options of [undefined, {}, { skipCaptcha: false }]) {
-      for (const key of [keys[0].key, "wrong"]) {
+      for (const key of [
+        keys[0].key,
+        "wrong",
+        config.adminApiKey,
+        config.apiKey,
+      ]) {
         await expect(
           service.login(
             tenantIds[0],
@@ -329,7 +492,12 @@ describe("Tenant Key captcha exemption", () => {
               captchaCode: "ABCD",
             };
       await expect(
-        service.login(tenantIds[0], body, context(), keys[0].key)
+        service.login(
+          tenantIds[0],
+          body,
+          context(),
+          attempt === 2 ? config.adminApiKey : keys[0].key
+        )
       ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
     }
     expect(await getRedisClient().get(failureKey(created.username))).toBe("3");
@@ -339,6 +507,14 @@ describe("Tenant Key captcha exemption", () => {
         { login: created.username, password, options: skip },
         context(),
         secondKey.key
+      )
+    ).rejects.toMatchObject({ code: "LOGIN_LOCKED" });
+    await expect(
+      service.login(
+        tenantIds[0],
+        { login: created.username, password, options: skip },
+        context(),
+        config.adminApiKey
       )
     ).rejects.toMatchObject({ code: "LOGIN_LOCKED" });
     const challenge = await service.createCaptcha(tenantIds[0], context());
@@ -362,7 +538,8 @@ describe("Tenant Key captcha exemption", () => {
         keys[1].key
       )
     ).resolves.toMatchObject({ tenantId: tenantIds[1] });
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await getRedisClient().pexpire(failureKey(created.username), 1);
+    await new Promise((resolve) => setTimeout(resolve, 25));
     await service.login(
       undefined,
       { login: created.username, password, options: skip },
@@ -384,6 +561,52 @@ describe("Tenant Key captcha exemption", () => {
       keys[0].key
     );
     expect(await getRedisClient().get(failureKey(created.username))).toBeNull();
+  });
+
+  it("shares the default Tenant lock across Admin and Service keys", async () => {
+    const created = await defaultAccount();
+    for (const apiKey of [
+      config.adminApiKey,
+      config.apiKey,
+      config.adminApiKey,
+    ]) {
+      await expect(
+        service.login(
+          undefined,
+          {
+            login: created.username.toUpperCase(),
+            password: "wrong",
+            options: skip,
+          },
+          context(),
+          apiKey
+        )
+      ).rejects.toMatchObject({ code: "LOGIN_INVALID" });
+    }
+    const counterKey = `${prefix}:login-failure:default:${created.username}`;
+    expect(await getRedisClient().get(counterKey)).toBe("3");
+    for (const apiKey of [config.adminApiKey, config.apiKey]) {
+      await expect(
+        service.login(
+          "default",
+          { login: created.username, password, options: skip },
+          context(),
+          apiKey
+        )
+      ).rejects.toMatchObject({ code: "LOGIN_LOCKED" });
+    }
+    expect(await db.session.count({ where: { accountId: created.id } })).toBe(
+      0
+    );
+    await getRedisClient().pexpire(counterKey, 1);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await service.login(
+      undefined,
+      { login: created.username, password, options: skip },
+      context(),
+      config.apiKey
+    );
+    expect(await getRedisClient().get(counterKey)).toBeNull();
   });
 
   it("unifies account rejection, records failure actors and does not create sessions", async () => {

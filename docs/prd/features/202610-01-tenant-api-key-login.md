@@ -1,17 +1,17 @@
-# 202610-01 Tenant API Key 授权跳过登录验证码
+# 202610-01 API Key 授权跳过登录验证码
 
 状态：**已实现**。现有 Login API、OpenAPI、SDK 与当前生效规范已同步支持本文能力。
 
 ## 概述
 
-可信业务后端需要在 Tenant 开启登录 Captcha 时，使用 Tenant API Key 和用户账号密码完成登录，同时保留公开登录的验证码要求。本 Feature 扩展现有 `POST /v1/auth/login`，由调用方通过 `options.skipCaptcha` 显式请求豁免，服务端验证 Tenant API Key 后授权。
+可信业务后端需要在 Tenant 开启登录 Captcha 时，使用 Admin、Service 或 Tenant API Key 和用户账号密码完成登录，同时保留公开登录的验证码要求。本 Feature 扩展现有 `POST /v1/auth/login`，由调用方通过 `options.skipCaptcha` 显式请求豁免，服务端沿用数据面 API Key 凭证解析规则验证并授权。
 
 API Key 仅授权跳过验证码，不代替用户密码，也不映射为用户 Account 或 Session。登录成功后的身份主体仍来自通过密码验证的 Account。
 
 范围：
 
 - 扩展现有 Login 请求，支持可选的 `options.skipCaptcha`。
-- 仅允许数据库管理的有效 Tenant API Key 授权验证码豁免。
+- 允许有效 Admin、Service 和 Tenant API Key 按数据面租户权限授权验证码豁免。
 - 两种登录方式复用账号密码验证、失败锁定、Session 和 Token 签发流程。
 - 同步 OpenAPI 与 SDK 的现有 `login` 参数，不新增接口或 SDK 方法。
 
@@ -64,7 +64,7 @@ Content-Type: application/json
 | 请求条件 | 行为 |
 | --- | --- |
 | 未提供 `options`，或 `skipCaptcha` 缺省／为 `false` | 沿用目标 Tenant 的验证码设置 |
-| `skipCaptcha: true`，Tenant Key 有效且租户匹配 | 跳过验证码，继续验证账号密码 |
+| `skipCaptcha: true`，API Key 有效且具有目标租户权限 | 跳过验证码，继续验证账号密码 |
 | `skipCaptcha: true`，Key 缺失、无效、已删除或越权 | 返回 `401 API_KEY_INVALID`，不降级为普通登录 |
 
 仅携带有效 Key 不自动豁免验证码。未请求豁免时，`x-api-key` 不参与公开登录的鉴权与租户选择，即使其无效也不改变该流程。租户已关闭验证码时，显式请求豁免仍须通过 Key 验证。
@@ -87,16 +87,31 @@ const tokens = await client.login(
 
 此例省略 Tenant header，由 Key 确定租户。对非默认租户后续调用 Refresh、Logout 时，仍须通过客户端配置或方法参数提供 `tokens.tenantId`。
 
+Admin Key 指定非默认 Tenant、Service Key 使用默认 Tenant 的 SDK 调用方式一致，仍使用第六参数：
+
+```ts
+const adminClient = new StargateNextClient(endpoint, { apiKey: adminApiKey });
+await adminClient.login("alice", password, undefined, undefined, "tenant-a", {
+  skipCaptcha: true,
+});
+const serviceClient = new StargateNextClient(endpoint, { apiKey: serviceApiKey });
+await serviceClient.login("alice", password, undefined, undefined, undefined, {
+  skipCaptcha: true,
+});
+```
+
 ## 权限与租户选择
 
-仅数据库管理的 Tenant API Key 可以授权豁免。Admin API Key、全局 Service API Key 和 Bearer Access Token 均不可替代；显式请求豁免但没有有效 Tenant Key 时统一返回 `API_KEY_INVALID`。
+Admin API Key、Service API Key 与数据库管理的 Tenant API Key 均可按现有数据面权限授权豁免，直接复用 `resolveApiCredential`。Bearer Access Token 不能替代 API Key；显式请求豁免但没有有效 API Key 时返回 `API_KEY_INVALID`。
 
 | 登录方式 | 未提供 `x-tenant-id` | 提供 `x-tenant-id` |
 | --- | --- | --- |
 | 未请求豁免 | 使用公开登录的 `default` 默认值 | 按公开登录规则解析目标 Tenant |
-| 请求豁免 | 使用 Tenant Key 所属 Tenant | 必须与 Key 所属 Tenant 匹配，否则返回 `API_KEY_INVALID` |
+| Admin Key 请求豁免 | 使用 `default` | 可选择任一存在且 active 的 Tenant |
+| Service Key 请求豁免 | 使用 `default` | 仅允许 `default`，否则返回 `API_KEY_INVALID` |
+| Tenant Key 请求豁免 | 使用 Key 所属 Tenant | 必须与所属 Tenant 匹配，否则返回 `API_KEY_INVALID` |
 
-豁免路径沿用现有数据面的 Tenant header 格式校验与租户状态错误语义：格式非法返回 `TENANT_INVALID`，目标 Tenant 不存在返回 `TENANT_INVALID`，停用返回 `TENANT_DISABLED`。格式合法但与 Key 不匹配时先拒绝越权，不查询或泄露另一 Tenant 是否存在。
+豁免路径沿用现有数据面的 Tenant header 格式校验与租户状态错误语义：格式非法返回 `TENANT_INVALID`，目标 Tenant 不存在返回 `TENANT_INVALID`，停用返回 `TENANT_DISABLED`。Service Key 指定非 `default` 或 Tenant Key 指定非所属 Tenant 时先拒绝越权，不查询或泄露另一 Tenant 是否存在。
 
 已删除的 Tenant Key 不得继续授权登录。Key 删除只阻止后续豁免调用，不额外撤销此前通过该 Key 授权登录所建立的用户 Session；既有 Session 沿用用户、租户状态及撤销规则。
 
@@ -105,7 +120,7 @@ const tokens = await client.login(
 处理顺序：
 
 1. 校验 `options` 结构及类型，确定是否请求豁免；非法选项直接返回 `BODY_INVALID`。
-2. 请求豁免时，先验证 Tenant Key、租户归属与租户状态，再验证账号字段和密码。Key 验证失败时不继续处理 Captcha、账户查询或用户密码验证。
+2. 请求豁免时，先验证 API Key、租户权限与租户状态，再验证账号字段和密码。Key 验证失败时不继续处理 Captcha、账户查询或用户密码验证。
 3. 未请求豁免时，沿用公开登录的租户选择、字段校验和 Tenant 验证码设置。
 4. 两种方式汇入同一套账号规范化、登录锁检查、密码与账户状态验证流程；仅在授权条件成立时省略 Captcha 校验。获准豁免的请求即使携带非法 Captcha 字段，也忽略这些字段。
 5. 成功后创建普通用户 Session，签发与现有登录一致的 Token 和 Refresh Key，并清除共享登录失败计数。
@@ -114,10 +129,10 @@ const tokens = await client.login(
 
 - 账号字段缺失或非法沿用 `LOGIN_IDENTIFIER_INVALID`、`PASSWORD_INVALID`。
 - Account 不存在、已禁用、已删除、密码不可认证或密码错误，统一返回 `LOGIN_INVALID`，不暴露具体账户状态，不创建 Session。
-- 锁定期间继续返回 `LOGIN_LOCKED`；持有正确密码和有效 Tenant Key 也不得绕过锁定。
+- 锁定期间继续返回 `LOGIN_LOCKED`；持有正确密码和有效 API Key 也不得绕过锁定。
 - 未请求豁免时，Captcha 字段与挑战的错误语义保持原样。
 
-失败计数继续以 Tenant 和规范化 login 为维度，复用现有阈值、锁定时间及 Redis 状态，不按入口或 Key ID 拆分。两种登录方式交替失败仍累计至同一锁定；更换同租户 Key 不得绕过锁定。无效 Key、非法请求体和字段校验失败不累计用户密码失败次数。
+失败计数继续以 Tenant 和规范化 login 为维度，复用现有阈值、锁定时间及 Redis 状态，不按入口或 Key ID 拆分。两种登录方式交替失败仍累计至同一锁定；更换同租户 Key 或切换凭证类型不得绕过锁定。无效 Key、非法请求体和字段校验失败不累计用户密码失败次数。
 
 JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既有契约。Captcha 豁免不影响账户、租户状态或多租户隔离规则。
 
@@ -125,9 +140,9 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 
 沿用 `login` 事件，不新增事件类型。获准豁免后，登录成功及账号密码验证失败的审计均记录：
 
-- `actorType: tenant_key`，`actorId` 为授权此次请求的 Tenant Key ID。
-- `tenantId` 为 Key 所属 Tenant；`accountId` 为目标账户 ID，无法定位账户时保持为空。
-- `metadata.method: tenant_api_key`，用于区分登录来源；成功时关联新建 Session。
+- 使用凭证解析结果的 `actorType` 与 `actorId`：Tenant Key 为 `tenant_key` 与 Key ID；Admin 为 `admin`；Service 为 `service`，后二者不生成虚构 actor ID。
+- `tenantId` 为授权后选定的 Tenant；`accountId` 为目标账户 ID，无法定位账户时保持为空。
+- `metadata.method` 分别为 `tenant_api_key`、`admin_api_key`、`service_api_key`，兼容原 Tenant Key 记录；成功时关联新建 Session。
 - 成功与失败结果，以及既有 Request ID、IP、User-Agent 上下文。
 
 未请求豁免的登录保持原有审计语义。Key 验证失败、请求体错误和锁定拒绝不新增独立登录审计要求，沿用既有处理边界。
@@ -153,6 +168,24 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 - 均返回 `200` 和既有结构的 `AuthTokens`，`tenantId` 与 Key 所属 Tenant 一致。
 - 创建的 Session 属于通过密码认证的 Account，Tenant 验证码设置保持不变。
 
+### Admin 与 Service 沿用数据面租户权限
+
+**Given**
+
+- `default` 与非默认 Tenant A 均为 active，并有可密码认证的账户；调用方持有有效 Admin 和 Service Key。
+
+**When**
+
+- Admin Key 显式指定 A，或省略 Tenant header、显式指定 `default`，提交对应账户的正确密码与 `skipCaptcha: true`。
+- Service Key 分别省略 Tenant header、显式指定 `default`，提交正确账号密码与 `skipCaptcha: true`。
+
+**Then**
+
+- Admin 指定 A 时在 A 登录；其他四种组合均在 `default` 登录成功，不要求 Captcha。
+- Admin 省略 header 不会从账户标识推断 Tenant；Service Key 指定非默认 Tenant 返回 `API_KEY_INVALID`。
+- 成功及密码失败分别记录 `admin`／`service` 调用方与对应 method，actor ID 为空，目标 Account 单独记录。
+- HTTP 和 SDK 均可完成 Refresh、Logout 和会话撤销，原有调用签名保持兼容。
+
 ### 拒绝无效凭证和跨租户豁免
 
 **Given**
@@ -161,14 +194,15 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 
 **When**
 
-- 分别不携带 Key、携带错误或已删除的 Key，或仅使用 Admin Key、Service Key、Bearer Token。
+- 分别不携带 Key、携带错误或已删除的 Key，或仅使用 Bearer Token。
+- 使用 Service Key 选择非 `default` Tenant，或使用 Admin Key 选择不存在的 Tenant；各类合法 Key 还须覆盖格式非法的 Tenant header。
 - 使用 A 的 Key 并显式选择 B，包括 B 不存在的情况。
-- 使用合法 Key，但其所属 Tenant 已停用。
+- 使用 Tenant Key 或 Admin Key，选择已停用的目标 Tenant。
 
 **Then**
 
-- 不具备有效 Tenant Key 或租户越权时返回 `API_KEY_INVALID`，不降级、不创建 Session。
-- Tenant 停用时返回 `TENANT_DISABLED`；其他 Tenant 数据不被查询或泄露。
+- 不具备有效 API Key 或租户越权时返回 `API_KEY_INVALID`，不降级、不创建 Session。
+- Tenant header 格式非法或 Admin 选择不存在的 Tenant 时返回 `TENANT_INVALID`；目标 Tenant 停用时返回 `TENANT_DISABLED`。越权请求不查询或泄露其他 Tenant 数据。
 - 无效 Key 不计入目标 login 的失败次数，账号字段错误不优先于 Key 验证失败。
 
 ### 未请求豁免时保留公开登录行为
@@ -197,7 +231,7 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 **When**
 
 - 分别提交 `null`、数组、标量 options，或未知选项、非 boolean 的 `skipCaptcha`。
-- 通过合法 Tenant Key 请求豁免，同时提交上述 Captcha 或非法 Captcha 字段。
+- 通过合法 API Key 请求豁免，同时提交上述 Captcha 或非法 Captcha 字段。
 
 **Then**
 
@@ -208,17 +242,17 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 
 **Given**
 
-- Tenant A、B 各有相同登录标识的账户，A 下有多把有效 Tenant Key。
+- Tenant A、B 各有相同登录标识的账户，A 下有多把有效 Tenant Key，调用方还持有 Admin 和 Service Key。
 
 **When**
 
 - 在 A 中以同一规范化 login 交替使用普通登录和 Key 豁免登录提交错误密码；普通登录提供有效 Captcha。
-- 达到现有失败阈值后，更换 A 的 Key 并提交正确密码。
+- 达到现有失败阈值后，更换 A 的 Key 或切换为 Admin Key 并提交正确密码；另在 `default` 中交替使用 Admin 和 Service Key 验证相同锁定行为。
 - 在 B 中以正确凭证登录；待 A 锁定期结束后，再对 A 登录。
 
 **Then**
 
-- A 的失败次数共同累计，达到阈值后按现有时机进入锁定，锁定期间正确密码及更换 Key 均返回 `LOGIN_LOCKED`。
+- A 的失败次数共同累计，达到阈值后按现有时机进入锁定，锁定期间正确密码、更换 Key 及切换凭证类型均返回 `LOGIN_LOCKED`。
 - B 不受 A 的锁定影响。
 - A 锁定期结束后恢复正常登录；成功后共享失败计数被清除。
 
@@ -226,7 +260,7 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 
 **Given**
 
-- 调用方具备合法 Tenant Key，目标 Tenant 为 active。
+- 调用方具备对目标 Tenant 有权限的合法 API Key，目标 Tenant 为 active。
 
 **When**
 
@@ -249,21 +283,21 @@ JWT claims、有效期、Refresh、Logout、Session 查询与撤销均沿用既�
 **When**
 
 - 使用既有无 options 的请求，以及新增的 options 参数分别通过 HTTP 和 SDK 调用 `login`。
-- 通过合法 Tenant Key 分别完成一次成功登录和一次错误密码登录。
+- 分别通过合法 Admin、Service 和 Tenant Key 完成一次成功登录和一次错误密码登录。
 
 **Then**
 
 - 旧请求兼容；OpenAPI、SDK 类型和实际请求行为一致，不新增登录路径或方法。
-- 豁免登录的成功及密码失败事件均可通过 `tenant_key`、Key ID 和 `metadata.method` 追溯来源。
+- 豁免登录的成功及密码失败事件均可通过 `actorType` 和三类 `metadata.method` 区分来源；Tenant Key 保留 Key ID，Admin／Service 的 actor ID 为空，不记录环境变量 Key。
 - 审计关联正确 Tenant、目标 Account 和成功登录的 Session，且不包含秘密。
 
 ## 实现验证与规范同步
 
-实现阶段使用服务集成测试覆盖 Tenant Key 权限、跨租户隔离、共享失败锁定、Captcha 消费边界及审计；使用 API／SDK 黑盒测试覆盖请求选项、错误契约和登录至 Refresh、Logout、撤销的认证闭环。
+实现阶段使用服务集成测试覆盖三类 API Key 权限矩阵、跨租户隔离、共享失败锁定、Captcha 消费边界及审计；使用 API／SDK 黑盒测试覆盖请求选项、错误契约和登录至 Refresh、Logout、撤销的认证闭环。
 
 实现交付已同步以下内容：
 
-- 当前产品模型中的登录流程：增加可信后端显式请求、Tenant Key 授权的验证码豁免路径。
+- 当前产品模型中的登录流程：增加可信后端显式请求、API Key 按统一数据面权限授权的验证码豁免路径。
 - 当前领域概念中的 Tenant Settings、Authentication Service 与 Captcha 不变量：将 Tenant 验证码要求明确限定为未获准豁免的请求，同时保留 Key 与用户身份的边界。
 - 当前关键场景与验收：增加上述行为，并明确普通登录仍按 Tenant 设置校验 Captcha。
 - OpenAPI、服务输入契约与生成 SDK：扩展现有 Login 的 options，说明 `x-api-key` 仅在请求豁免时必需，保留原有公开登录调用方式。

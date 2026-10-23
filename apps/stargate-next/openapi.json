@@ -45,14 +45,14 @@
     "/v1/auth/login": {
       "post": {
         "operationId": "login",
-        "description": "Authenticates an account password. options.skipCaptcha=true requires a valid database-managed Tenant API Key in x-api-key; Admin and Service keys cannot authorize this exemption. The key selects its own Tenant when x-tenant-id is omitted; an explicit Tenant must match. Authorized exemption ignores captcha fields, while retaining account checks and the shared login lock. Without explicit exemption, the API key is ignored and existing Tenant captcha settings apply.",
+        "description": "Authenticates an account password. options.skipCaptcha=true requires a valid Admin, Service or Tenant API Key in x-api-key, using the same credential scope rules as other data-plane operations. Admin keys may select an active Tenant and default to default; Service keys are restricted to default; Tenant keys use their own Tenant and require an explicit Tenant to match. Authorized exemption ignores captcha fields, while retaining account checks and the shared login lock. Without explicit exemption, the API key is ignored and existing Tenant captcha settings apply. Bearer tokens cannot authorize exemption.",
         "parameters": [
           { "$ref": "#/components/parameters/TenantHeader" },
           {
             "in": "header",
             "name": "x-api-key",
             "required": false,
-            "description": "Tenant API Key, required only when options.skipCaptcha is true.",
+            "description": "Admin, Service or Tenant API Key, required only when options.skipCaptcha is true. Tenant scope follows the existing data-plane credential rules.",
             "schema": { "type": "string" }
           }
         ],
@@ -588,7 +588,7 @@
         "properties": {
           "skipCaptcha": {
             "type": "boolean",
-            "description": "Explicitly requests captcha exemption authorized by a Tenant API Key. Omitted or false uses the Tenant captcha setting."
+            "description": "Explicitly requests captcha exemption authorized by an Admin, Service or Tenant API Key within its Tenant scope. Omitted or false uses the Tenant captcha setting."
           }
         }
       },

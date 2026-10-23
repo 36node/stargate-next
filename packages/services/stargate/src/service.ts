@@ -140,6 +140,12 @@ type AuditInput = {
   tenantId: string;
 };
 
+type LoginContext = {
+  tenantId: string;
+  captchaRequired: boolean;
+  credential?: TenantScope;
+};
+
 type DatabaseClient = Prisma.TransactionClient | typeof db;
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -1297,40 +1303,24 @@ export class StargateService implements StargateServiceContract {
     });
   }
 
-  private async captchaBypassTenant(
-    apiKey: string | undefined,
-    tenantHeader: string | undefined
-  ): Promise<{ tenant: Tenant; keyId: string }> {
-    if (
-      !apiKey ||
-      this.constantTimeEquals(apiKey, this.settings.adminApiKey) ||
-      this.constantTimeEquals(apiKey, this.settings.apiKey)
-    ) {
-      throw serviceError(
-        "API_KEY_INVALID",
-        "invalid API key",
-        "unauthenticated"
-      );
+  private async loginContext(
+    tenantHeader: string | undefined,
+    credential?: TenantScope
+  ): Promise<LoginContext> {
+    if (credential) {
+      return {
+        tenantId: credential.tenantId,
+        captchaRequired: false,
+        credential,
+      };
     }
-    const key = await this.findTenantApiKey(apiKey);
-    if (!key) {
-      throw serviceError(
-        "API_KEY_INVALID",
-        "invalid API key",
-        "unauthenticated"
-      );
-    }
-    const requested = this.parseCredentialTenantHeader(tenantHeader);
-    if (requested !== undefined && requested !== key.tenantId) {
-      throw serviceError(
-        "API_KEY_INVALID",
-        "invalid API key",
-        "unauthenticated"
-      );
-    }
+    const tenant = await this.resolvePublicTenant(
+      tenantHeader,
+      "LOGIN_INVALID"
+    );
     return {
-      keyId: key.id,
-      tenant: await this.requireActiveTenant(key.tenantId),
+      tenantId: tenant.id,
+      captchaRequired: tenantSettingsRequiresCaptcha(tenant.settings),
     };
   }
 
@@ -1341,15 +1331,13 @@ export class StargateService implements StargateServiceContract {
     apiKey?: string
   ): Promise<AuthTokens> {
     const { body, options } = loginRequest(rawBody);
-    const bypass =
+    const credential =
       options.skipCaptcha === true
-        ? await this.captchaBypassTenant(apiKey, tenantHeader)
+        ? await this.resolveApiCredential(apiKey, tenantHeader)
         : undefined;
-    const input = loginInput(body, bypass !== undefined);
-    const tenant =
-      bypass?.tenant ??
-      (await this.resolvePublicTenant(tenantHeader, "LOGIN_INVALID"));
-    const tenantId = tenant.id;
+    const input = loginInput(body, credential !== undefined);
+    const loginContext = await this.loginContext(tenantHeader, credential);
+    const { tenantId } = loginContext;
     const normalizedLogin = this.normalizeLoginForLookup(input.login.trim());
     const failureKey = this.redisKey(
       LOGIN_FAILURE_PREFIX,
@@ -1366,7 +1354,7 @@ export class StargateService implements StargateServiceContract {
         "unauthenticated"
       );
     }
-    if (!bypass && tenantSettingsRequiresCaptcha(tenant.settings)) {
+    if (loginContext.captchaRequired) {
       if (input.captchaCode === undefined) {
         throw serviceError(
           "CAPTCHA_CODE_INVALID",
@@ -1415,7 +1403,7 @@ export class StargateService implements StargateServiceContract {
     ) {
       await this.loginFailure(failureKey, tenantId, context, {
         accountId: account?.id,
-        tenantKeyId: bypass?.keyId,
+        credential: loginContext.credential,
       });
       throw serviceError(
         "LOGIN_INVALID",
@@ -1446,7 +1434,7 @@ export class StargateService implements StargateServiceContract {
     });
     await this.audit({
       accountId: account.id,
-      ...this.loginAuditActor(account.id, bypass?.keyId),
+      ...this.loginAuditActor(account.id, loginContext.credential),
       context,
       eventType: "login",
       sessionId: session.id,
@@ -1470,8 +1458,8 @@ export class StargateService implements StargateServiceContract {
     context: RequestContext,
     {
       accountId,
-      tenantKeyId,
-    }: { accountId?: string; tenantKeyId?: string } = {}
+      credential,
+    }: { accountId?: string; credential?: TenantScope } = {}
   ): Promise<void> {
     await withRedisTimeout(
       getRedisClient().eval(
@@ -1484,7 +1472,7 @@ export class StargateService implements StargateServiceContract {
     );
     await this.audit({
       accountId,
-      ...this.loginAuditActor(accountId, tenantKeyId),
+      ...this.loginAuditActor(accountId, credential),
       context,
       eventType: "login",
       success: false,
@@ -1494,13 +1482,18 @@ export class StargateService implements StargateServiceContract {
 
   private loginAuditActor(
     accountId?: string,
-    tenantKeyId?: string
+    credential?: TenantScope
   ): Pick<AuditInput, "actorId" | "actorType" | "metadata"> {
-    if (tenantKeyId) {
+    if (credential) {
       return {
-        actorId: tenantKeyId,
-        actorType: "tenant_key",
-        metadata: { method: "tenant_api_key" },
+        actorId: credential.actorId,
+        actorType: credential.actorType,
+        metadata: {
+          method:
+            credential.actorType === "tenant_key"
+              ? "tenant_api_key"
+              : `${credential.actorType}_api_key`,
+        },
       };
     }
     return {

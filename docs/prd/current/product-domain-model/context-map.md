@@ -84,7 +84,7 @@ flowchart LR
 - AccountId 稳定且不复用。
 - OpenAPI 是唯一契约来源。
 - JWT 只包含 `sub`、`sid`、`tid`、`type`、`iat`、`exp`。
-- Account、Session、Captcha、限流和认证审计均以 `tenantId` 隔离；缺少 Tenant header 的兼容调用落入 `default`，显式请求验证码豁免并获准时则取 Tenant Key 所属租户。
+- Account、Session、Captcha、限流和认证审计均以 `tenantId` 隔离；缺少 Tenant header 的兼容调用落入 `default`，显式请求验证码豁免并获准时按数据面凭证选择租户：Admin 和 Service 缺省为 `default`，Tenant Key 缺省为所属租户；Admin 可指定任一有效 active 租户，Service 仅允许 `default`，Tenant Key 仅允许所属租户。
 - Tenant 的登录 Captcha 设置由 Auth 拥有并通过 OpenAPI 与生成 SDK 发布；只有显式 `false` 才关闭登录 Captcha。
 - 登录、Refresh、Logout、用户自改密码、Account 和 Session 管理具有稳定语义。
 
@@ -161,7 +161,7 @@ Phase B 迁移的是验收场景和查询契约，不是 Playground mock 数据�
 - Auth 响应不包含 Profile 或业务授权。
 - API、日志和审计不暴露密码、Token、Captcha 或内部 hash。
 - API Key 只代表服务调用方，不映射为人员 Principal。
-- Login 的 `captchaId` 与 `captchaCode` 在 Published Language 中可选，由 Auth 根据 Tenant Key 豁免结果和目标 Tenant 设置实施条件必填；调用方按 `settings.loginCaptchaRequired !== false` 解释有效策略。
+- Login 的 `captchaId` 与 `captchaCode` 在 Published Language 中可选，由 Auth 根据 API Key 豁免结果和目标 Tenant 设置实施条件必填；调用方按 `settings.loginCaptchaRequired !== false` 解释有效策略。
 - 用户自改密码只接受 Bearer Access Token，并从 `tid`、`sub`、`sid` 确定 Tenant、Account 和当前 Session；不得通过 API Key 代用该语义。
 - Admin API Key 是平台控制面凭证；兼容 Service API Key 固定 `default`；Tenant API Key 固定所属 Tenant。三者都不是业务授权主体。
 - 数据面通过 `x-tenant-id` 选择或校验单一 Tenant；Tenant 控制面不得被 client 级 Tenant header 污染。
@@ -174,7 +174,7 @@ Access Token 只建立 Principal。`tenantId` 只说明该 Principal 来自哪�
 
 `App -> Auth login -> Principal -> Mekong Authorization Context -> protected resource`
 
-Auth 在登录边界内验证显式请求的 Tenant Key 豁免，或解析 TenantSettings，决定是否验证、消费 Captcha；关闭 Captcha 不改变后续 Account、PasswordCredential、Login Lock、Session 或 Token 语义。业务应用不拥有或复制该认证策略，当前也不通过公开匿名接口发现 Tenant 设置。
+Auth 在登录边界内验证显式请求的 API Key 豁免，或解析 TenantSettings，决定是否验证、消费 Captcha；关闭 Captcha 不改变后续 Account、PasswordCredential、Login Lock、Session 或 Token 语义。业务应用不拥有或复制该认证策略，当前也不通过公开匿名接口发现 Tenant 设置。
 
 创建业务用户：
 

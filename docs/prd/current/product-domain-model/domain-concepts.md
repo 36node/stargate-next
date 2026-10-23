@@ -130,7 +130,7 @@ type TenantSettings = {
 };
 ```
 
-- 缺省、`{}` 或显式 `true` 均表示未获准豁免的登录要求 Captcha；只有显式 `false` 才关闭该租户要求。单次 Tenant Key 豁免不修改此设置。
+- 缺省、`{}` 或显式 `true` 均表示未获准豁免的登录要求 Captcha；只有显式 `false` 才关闭该租户要求。单次 API Key 豁免不修改此设置。
 - Tenant 对外表示保留持久化形态，不把缺省值物化为 `true`；消费者按 `loginCaptchaRequired !== false` 解释有效策略。
 - 创建与更新只接受 boolean 类型的已知字段，不接受 `null`、数组、标量或未知 key。
 - 更新采用整对象替换而非字段合并；提交 `{}` 会恢复默认要求 Captcha。
@@ -461,10 +461,10 @@ Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure C
 
 认证服务编排登录：
 
-1. 校验可选的 `options`；显式请求 `skipCaptcha: true` 时先验证 Tenant Key 并确定所属 Tenant，否则按公开登录规则选择 Tenant；确认状态为 `active`。
+1. 校验可选的 `options`；显式请求 `skipCaptcha: true` 时先按数据面 API Key 权限解析凭证并确定目标 Tenant（Admin 默认 `default` 且可指定任一有效租户，Service 仅 `default`，Tenant Key 仅所属租户），否则按公开登录规则选择 Tenant；确认状态为 `active`。
 2. 规范化 login。
 3. 检查该 Tenant 的 Login Lock。
-4. 读取 TenantSettings；仅在未获准 Tenant Key 豁免且 `loginCaptchaRequired !== false` 时，要求并在该 Tenant 验证、消费 Captcha。
+4. 未获准 API Key 豁免时读取 TenantSettings；仅在 `loginCaptchaRequired !== false` 时，要求并在该 Tenant 验证、消费 Captcha。
 5. 在该 Tenant 按任一 LoginIdentifier 查找 Account。
 6. 统一校验 Account 状态、删除状态、密码算法和密码。
 7. 创建带相同 TenantId 的 Session 与 Refresh Key。
@@ -475,9 +475,9 @@ Captcha 创建频率限制、Login Failure Counter 与 Password Change Failure C
 
 Login 的 `captchaId` 与 `captchaCode` 在公开契约中可选，但未获准豁免且要求 Captcha 的 Tenant 会在运行时实施条件必填：缺少字段分别返回 `CAPTCHA_CODE_INVALID` 或 `CAPTCHA_ID_INVALID`，无效挑战返回 `CAPTCHA_INVALID`。显式关闭 Captcha 只跳过第 4 步，不改变 Tenant 状态、Login Lock、Account 或密码校验，也不关闭 Captcha 创建与独立验证能力。
 
-验证码豁免必须通过服务端 Tenant Key 验证结果授权，不能信任请求选项本身。处理顺序为 options 校验、Key 有效性、Tenant header 格式与归属、Tenant 状态，然后账号字段和密码；获准后忽略且不消费所有 Captcha 字段。无效 Key、非法 options 和字段错误不累计密码失败次数。Tenant 已关闭验证码时，显式请求豁免仍须提供合法 Key。
+验证码豁免必须通过服务端 API Key 凭证及租户权限验证结果授权，不能信任请求选项本身。处理顺序为 options 校验、Key 有效性、Tenant header 格式与归属、Tenant 状态，然后账号字段和密码；获准后忽略且不消费所有 Captcha 字段。无效 Key、非法 options 和字段错误不累计密码失败次数。Tenant 已关闭验证码时，显式请求豁免仍须提供合法 Key。
 
-豁免登录的成功及账号密码失败仍记录 `login` 审计，actor 为 `tenant_key` 与 Key ID，目标 Account 单独记录，metadata 为 `{ method: "tenant_api_key" }`；普通登录审计不变。Key 删除阻止后续豁免，不额外撤销已签发的用户 Session。API Key 仅代表调用方，Session 身份仍来自通过密码验证的 Account。
+豁免登录的成功及账号密码失败仍记录 `login` 审计，actor 使用解析结果：Tenant Key 为 `tenant_key` 与 Key ID，Admin／Service 为 `admin`／`service` 且 actor ID 为空；目标 Account 单独记录，metadata.method 分别为 `tenant_api_key`、`admin_api_key`、`service_api_key`；普通登录审计不变。Key 删除阻止后续豁免，不额外撤销已签发的用户 Session。API Key 仅代表调用方，Session 身份仍来自通过密码验证的 Account。
 
 ### 6.2 Refresh Service
 
@@ -493,7 +493,7 @@ Login 的 `captchaId` 与 `captchaCode` 在公开契约中可选，但未获准�
 
 ### 6.3 Login Throttling Policy
 
-- 失败计数按 Tenant 与规范化 login 隔离；普通登录与 Tenant Key 豁免登录共享计数，不能通过更换 Key 绕过锁定。
+- 失败计数按 Tenant 与规范化 login 隔离；普通登录与 API Key 豁免登录共享计数，不能通过更换 Key 或切换凭证类型绕过锁定。
 - Captcha 验证失败和账户/密码验证失败均增加计数。
 - 达到阈值后，在配置时间内拒绝继续登录。
 - 登录成功后清除计数。
@@ -683,7 +683,7 @@ Consumed、Exhausted 和 Expired 都是终态，不允许恢复或再次验证�
 - Captcha code 不得明文持久化。
 - Captcha 只能成功消费一次。
 - Captcha 创建按 Tenant 与客户端 IP 限流。
-- 未获准 Tenant Key 豁免时，登录是否要求 Captcha 由目标 Tenant 决定；Captcha 创建和独立验证能力不随该设置关闭。
+- 未获准 API Key 豁免时，登录是否要求 Captcha 由目标 Tenant 决定；Captcha 创建和独立验证能力不随该设置关闭。
 - 登录失败按 Tenant 与规范化 login 限流。
 - 用户自改密码的当前密码失败按 Tenant 与 Account 限流，且不与登录失败共享配置或计数。
 - Captcha 与 JWT、Refresh Key 不得复用 HMAC/signing secret。

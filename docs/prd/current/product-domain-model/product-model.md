@@ -31,7 +31,7 @@ Stargate Next 通过“身份认证与业务授权分离”解决这些问题。
 3. **JWT 最小化**：JWT 只表达租户、账户与会话身份，不携带业务授权快照。
 4. **授权实时生效**：组织、角色和直接权限变更后，无需重新登录或重新签发 JWT。
 5. **契约优先**：OpenAPI 是公开接口的唯一契约来源，Playground 和 Mekong 通过生成的 SDK 调用。
-6. **安全默认**：密码、Captcha、Refresh Key、日志和审计均遵循最小暴露原则；未获准 Tenant Key 豁免的登录按 Tenant 设置要求 Captcha，只有显式关闭设置才不要求。
+6. **安全默认**：密码、Captcha、Refresh Key、日志和审计均遵循最小暴露原则；未获准 API Key 豁免的登录按 Tenant 设置要求 Captcha，只有显式关闭设置才不要求。
 7. **整体切换**：不长期双写，不允许新旧 Auth 同时签发 Session。
 8. **渐进交付**：先完成认证核心和 Playground 自验收，再进行真实 Mekong 集成与数据迁移。
 
@@ -125,8 +125,8 @@ Playground mock 数据只能保存在进程内或带独立前缀、TTL 和 reset
 ### 7.1 登录并加载业务权限
 
 1. 用户进入目标 Tenant 的登录流程。
-2. 用户使用 username、phone 或 email 与密码登录；未获准 Tenant Key 豁免且目标 Tenant 要求 Captcha 时，调用方同时创建并提交 `captchaId` 与 `captchaCode`。
-3. Stargate Next 在同一 Tenant 内按 Tenant Key 豁免结果和设置决定是否校验并消费 Captcha，再校验账户状态和密码并创建 Session。
+2. 用户使用 username、phone 或 email 与密码登录；未获准 API Key 豁免且目标 Tenant 要求 Captcha 时，调用方同时创建并提交 `captchaId` 与 `captchaCode`。
+3. Stargate Next 在同一 Tenant 内按 API Key 豁免结果和设置决定是否校验并消费 Captcha，再校验账户状态和密码并创建 Session。
 4. Stargate Next 返回 `tenantId`、`accountId`、`sessionId`、Access Token 和 Refresh Key。
 5. 业务应用从 JWT 获得 `{ tenantId, accountId, sessionId }` 身份信息。
 6. 业务应用按 `accountId` 从 Mekong 加载 Profile、组织和授权上下文。
@@ -258,7 +258,7 @@ type TenantSettings = {
 
 Login 请求中的 `captchaId` 与 `captchaCode` 在 OpenAPI 和生成 SDK 中为可选字段，因为是否必填由目标 Tenant 在运行时决定。未获准豁免且要求 Captcha 时，服务端仍实施字段、归属、有效期和一次性消费校验；显式关闭时直接进入账号密码与 Login Lock 流程。`POST /v1/captchas` 与 `POST /v1/captchas/verify` 不受该开关影响。
 
-可信后端可在同一 `POST /v1/auth/login` 请求中提交 `options: { skipCaptcha: true }` 和 `x-api-key`，请求单次验证码豁免。仅数据库管理的有效 Tenant Key 可授权；Admin Key、Service Key 和 Bearer Token 均不可替代。省略 `x-tenant-id` 时使用 Key 所属 Tenant，提供时必须匹配。授权后忽略所有 Captcha 字段，仍须通过账号密码、状态和共享 Login Lock 校验。缺失、无效或越权 Key 返回 `API_KEY_INVALID`，不降级为普通登录。未请求豁免时完全沿用公开登录规则，携带 Key 不自动授权或选择 Tenant。
+可信后端可在同一 `POST /v1/auth/login` 请求中提交 `options: { skipCaptcha: true }` 和 `x-api-key`，请求单次验证码豁免。复用数据面 API Key 权限：Admin Key 省略 `x-tenant-id` 时使用 `default`，显式提供时可选择任一存在且 active 的 Tenant；Service Key 只能使用 `default`；Tenant Key 省略时使用所属 Tenant，提供时必须匹配。Bearer Token 不能授权豁免。授权后忽略所有 Captcha 字段，仍须通过账号密码、状态和共享 Login Lock 校验。缺失、无效或越权 Key 返回 `API_KEY_INVALID`，不降级为普通登录。未请求豁免时完全沿用公开登录规则，携带 Key 不自动授权或选择 Tenant。
 
 `options` 仅接受可选 boolean 字段 `skipCaptcha`，非法对象、类型或未知选项返回 `BODY_INVALID`。SDK 的 `login` 保留原有五个位置参数，在第六参数接受该对象，并且仅显式请求豁免时发送配置的 Key。
 
@@ -312,7 +312,7 @@ JWT 不得包含 `ns`、`roles`、`permissions` 或 `groups`。
 - Account 的规范化、唯一性、状态、管理员重置、用户自改密码和软删除行为符合契约。
 - 正确密码、错误密码、禁用和删除账户场景均得到稳定结果。
 - Captcha 具备 TTL、一次性消费、错误次数与频率限制。
-- Tenant 缺省或显式启用时登录要求 Captcha；显式关闭设置或有效 Tenant Key 授权豁免时可省略 Captcha，且不放宽密码、状态、锁定或隔离规则。
+- Tenant 缺省或显式启用时登录要求 Captcha；显式关闭设置或有效 API Key 按租户权限授权豁免时可省略 Captcha，且不放宽密码、状态、锁定或隔离规则。
 - Login、Refresh、Logout、用户自改密码和 Session revoke 可通过真实 PostgreSQL、Redis 和运行中服务完成黑盒验收。
 - 用户自改成功后当前 Session 可继续 Refresh、其他 Session 失效；失败或锁定时密码与全部 Session 均保持不变。
 - API、SDK、日志和审计不泄露密码、Captcha、Token 或内部 hash。

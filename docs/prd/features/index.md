@@ -22,4 +22,4 @@
 
 ## 2026-10
 
-1. [202610-01 Tenant API Key 授权跳过登录验证码](./202610-01-tenant-api-key-login.md)
+1. [202610-01 API Key 授权跳过登录验证码](./202610-01-tenant-api-key-login.md)

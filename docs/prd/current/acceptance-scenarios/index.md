@@ -373,9 +373,9 @@
 - Tenant 服务集成测试覆盖创建、更新、恢复默认、非法设置、响应形态，以及纯 settings 与混合 status 更新的审计边界。
 - OpenAPI 与生成 SDK 的 Tenant 类型均包含 `settings.loginCaptchaRequired?: boolean`。
 
-### Tenant Key 授权单次登录验证码豁免
+### API Key 授权单次登录验证码豁免
 
-此场景源自 [202610-01 Tenant API Key 授权跳过登录验证码](../../features/202610-01-tenant-api-key-login.md)。
+此场景源自 [202610-01 API Key 授权跳过登录验证码](../../features/202610-01-tenant-api-key-login.md)。
 
 **关联规范**
 
@@ -401,6 +401,24 @@
 - 审计事件为 `login`，actor 为 `tenant_key` 与 Key ID，目标 Account 单独记录，metadata 为 `{ method: "tenant_api_key" }`。
 - Session 与 Token 的有效期、Refresh、Logout 和撤销语义保持一致；删除 Key 只拒绝后续豁免，不额外撤销已有 Session。
 
+### Admin 与 Service Key 的登录豁免权限
+
+**Given**
+
+- `default` 与 Tenant A 均 active，且各有可密码认证的账户，调用方持有 Admin 与 Service Key。
+
+**When**
+
+- Admin 指定 A、指定 `default` 或省略 Tenant header；Service 指定 `default` 或省略 header；均提交对应账户的正确账号密码与 `options.skipCaptcha: true`。
+- 分别通过 HTTP 与 SDK 第六参数调用，成功后执行 Refresh、Logout 或会话撤销；再使用错误密码登录。
+
+**Then**
+
+- Admin 指定 A 时在 A 登录；省略 header 时与 Service 一样使用 `default`，均不消费 Captcha。
+- Service 指定非默认租户返回 `API_KEY_INVALID`，Admin 指定未知或停用租户分别返回 `TENANT_INVALID` 或 `TENANT_DISABLED`。
+- 成功及密码失败审计记录解析后的 `admin`／`service` 调用方，actor ID 为空，目标账户独立记录，method 分别为 `admin_api_key`／`service_api_key`，不泄露秘密。
+- 既有认证闭环及 SDK 调用方式保持兼容。
+
 ### 验证码豁免必须显式请求并通过凭证验证
 
 **Given**
@@ -409,31 +427,31 @@
 
 **When**
 
-- 不请求豁免，或提交非法 options、无效 Key、Admin Key、Service Key、跨租户 header，或仅携带 Bearer Token。
+- 不请求豁免，或提交非法 options、无效或已删除的 Key、Tenant Key 跨租户 header、Service Key 非默认租户，或仅携带 Bearer Token。
 - 目标 Tenant 已关闭验证码，但仍显式请求豁免并使用无效 Key。
 
 **Then**
 
 - 未请求豁免时忽略 API Key，继续使用公开登录的默认租户和 Tenant 验证码设置；仅携带有效 Key 不能豁免。
 - 非法 options 返回 `BODY_INVALID`；仅接受对象与 boolean `skipCaptcha`，拒绝未知选项。
-- 请求豁免时先验证 Tenant Key 再验证账号字段；Key 缺失、无效、已删除或越权返回 `API_KEY_INVALID`，不降级为普通登录。
-- Key 合法但 Tenant header 格式非法返回 `TENANT_INVALID`，所属 Tenant 停用返回 `TENANT_DISABLED`。
+- 请求豁免时先验证 API Key 和租户权限再验证账号字段；Key 缺失、无效、已删除或越权返回 `API_KEY_INVALID`，不降级为普通登录。
+- Key 合法但 Tenant header 格式非法，或 Admin 选择不存在的 Tenant 时返回 `TENANT_INVALID`；目标 Tenant 停用返回 `TENANT_DISABLED`。
 - 关闭验证码不会免除显式豁免请求的 Key 校验；错误请求不产生 Session 或密码失败计数。
 
 ### 普通登录与豁免登录共享失败锁定
 
 **Given**
 
-- 同一 Tenant 内一个账户可被多把合法 Tenant Key 授权登录，另一 Tenant 有同名账户。
+- 同一 Tenant 内一个账户可被多把合法 Tenant Key 与 Admin Key 授权登录，default Tenant 还可使用 Service Key；另一 Tenant 有同名账户。
 
 **When**
 
 - 交替使用普通登录与豁免登录提交错误密码，普通登录使用有效 Captcha。
-- 达到阈值后更换 Key 并提交正确密码；在另一 Tenant 登录；锁定期结束后重新登录。
+- 达到阈值后更换 Key 或切换 Key 类型并提交正确密码；在另一 Tenant 登录；锁定期结束后重新登录。
 
 **Then**
 
-- 失败按 Tenant 与规范化 login 共同累计；更换 Key 和登录方式均不能绕过 `LOGIN_LOCKED`。
+- 失败按 Tenant 与规范化 login 共同累计；更换 Key、凭证类型和登录方式均不能绕过 `LOGIN_LOCKED`。
 - 另一 Tenant 的登录不受影响；锁定期结束恢复登录，成功清除共享计数。
 - 账户不存在、禁用、删除、密码不可认证或错误均统一返回 `LOGIN_INVALID`，不创建 Session。
 - 获准豁免后的账号密码失败审计仍可追溯授权 Key，不包含任何秘密。

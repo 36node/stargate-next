@@ -2,19 +2,16 @@ import { randomBytes } from "node:crypto";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { env, request } from "./support/black-box.js";
+import { env, request, uniqueUsername } from "./support/black-box.js";
 
 const tenantId = `bb-bypass-${randomBytes(6).toString("hex")}`;
 const password = "api-bypass-password";
 let key: { id: string; key: string };
-let sequence = 0;
-
-function account() {
-  sequence += 1;
+function account(targetTenant = tenantId) {
   return request("/v1/accounts", "POST", {
     adminKey: true,
-    tenantId,
-    body: { username: `alice${sequence}`, password },
+    tenantId: targetTenant,
+    body: { username: uniqueUsername(), password },
   });
 }
 
@@ -39,6 +36,66 @@ beforeAll(async () => {
 
 describe("HTTP login captcha exemption", () => {
   it.each([
+    { kind: "admin", target: "named", explicit: true },
+    { kind: "admin", target: "default", explicit: false },
+    { kind: "admin", target: "default", explicit: true },
+    { kind: "service", target: "default", explicit: false },
+    { kind: "service", target: "default", explicit: true },
+  ])("supports $kind in $target with explicit header=$explicit", async ({
+    kind,
+    target,
+    explicit,
+  }) => {
+    const targetTenant = target === "named" ? tenantId : "default";
+    const created = await account(targetTenant);
+    const { id: accountId, username } = created.body as {
+      id: string;
+      username: string;
+    };
+    const loggedIn = await request("/v1/auth/login", "POST", {
+      apiKey: env(
+        kind === "admin" ? "STARGATE_ADMIN_API_KEY" : "STARGATE_API_KEY"
+      ),
+      tenantId: explicit ? targetTenant : undefined,
+      body: {
+        login: username,
+        password,
+        options: { skipCaptcha: true },
+        captchaCode: null,
+        captchaId: [],
+      },
+    });
+    expect(loggedIn).toMatchObject({
+      status: 200,
+      body: { accountId, tenantId: targetTenant },
+    });
+    const tokens = loggedIn.body as {
+      accessToken: string;
+      refreshKey: string;
+      sessionId: string;
+    };
+    expect(
+      await request("/v1/auth/refresh", "POST", {
+        tenantId: targetTenant,
+        body: { refreshKey: tokens.refreshKey },
+      })
+    ).toMatchObject({ status: 200, body: { sessionId: tokens.sessionId } });
+    expect(
+      await request("/v1/auth/login", "POST", {
+        accessToken: tokens.accessToken,
+        tenantId: targetTenant,
+        body: { login: username, password, options: { skipCaptcha: true } },
+      })
+    ).toMatchObject({ status: 401, body: { code: "API_KEY_INVALID" } });
+    expect(
+      await request("/v1/auth/logout", "POST", {
+        tenantId: targetTenant,
+        accessToken: tokens.accessToken,
+      })
+    ).toMatchObject({ status: 204 });
+  });
+
+  it.each([
     null,
     [],
     true,
@@ -52,13 +109,8 @@ describe("HTTP login captcha exemption", () => {
     ).toMatchObject({ status: 400, body: { code: "BODY_INVALID" } });
   });
 
-  it("rejects invalid keys, wrong credential classes and cross-Tenant requests", async () => {
-    for (const apiKey of [
-      undefined,
-      "wrong",
-      env("STARGATE_ADMIN_API_KEY"),
-      env("STARGATE_API_KEY"),
-    ]) {
+  it("rejects invalid keys and requests outside credential scope", async () => {
+    for (const apiKey of [undefined, "wrong"]) {
       expect(
         await request("/v1/auth/login", "POST", {
           apiKey,
@@ -66,6 +118,20 @@ describe("HTTP login captcha exemption", () => {
         })
       ).toMatchObject({ status: 401, body: { code: "API_KEY_INVALID" } });
     }
+    expect(
+      await request("/v1/auth/login", "POST", {
+        service: true,
+        tenantId,
+        body: { options: { skipCaptcha: true } },
+      })
+    ).toMatchObject({ status: 401, body: { code: "API_KEY_INVALID" } });
+    expect(
+      await request("/v1/auth/login", "POST", {
+        adminKey: true,
+        tenantId: "missing-bypass-tenant",
+        body: { options: { skipCaptcha: true } },
+      })
+    ).toMatchObject({ status: 401, body: { code: "TENANT_INVALID" } });
     expect(
       await request("/v1/auth/login", "POST", {
         apiKey: key.key,

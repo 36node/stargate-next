@@ -61,6 +61,73 @@ async function expectApiError(
 }
 
 describe("authentication SDK", () => {
+  it("supports Admin Tenant selection and default-only Service login with the existing SDK", async () => {
+    const tenantId = `sdk-admin-${uniqueUsername()}`;
+    const admin = new StargateNextClient(endpoint, {
+      apiKey: env("STARGATE_ADMIN_API_KEY"),
+    });
+    const service = client("203.0.113.90");
+    await admin.createTenant({ id: tenantId });
+    const created = await admin.createAccount(
+      { username: uniqueUsername(), password: "sdk-admin-password" },
+      tenantId
+    );
+    const tokens = await admin.login(
+      created.username,
+      "sdk-admin-password",
+      undefined,
+      undefined,
+      tenantId,
+      { skipCaptcha: true }
+    );
+    expect(tokens).toMatchObject({ accountId: created.id, tenantId });
+    await expect(
+      admin.refresh(tokens.refreshKey, tenantId)
+    ).resolves.toMatchObject({ sessionId: tokens.sessionId });
+    await admin.logout(tokens.accessToken, tenantId);
+    await expectApiError(
+      admin.refresh(tokens.refreshKey, tenantId),
+      401,
+      "REFRESH_INVALID"
+    );
+    await expectApiError(
+      service.login(
+        created.username,
+        "sdk-admin-password",
+        undefined,
+        undefined,
+        tenantId,
+        { skipCaptcha: true }
+      ),
+      401,
+      "API_KEY_INVALID"
+    );
+
+    const defaultAccount = await account(service, "sdk-default-password");
+    for (const sdk of [admin, service]) {
+      for (const header of [undefined, "default"]) {
+        const session = await sdk.login(
+          defaultAccount.username,
+          "sdk-default-password",
+          undefined,
+          undefined,
+          header,
+          { skipCaptcha: true }
+        );
+        expect(session).toMatchObject({
+          accountId: defaultAccount.id,
+          tenantId: "default",
+        });
+        await sdk.revokeSessions(defaultAccount.id, session.sessionId);
+        await expectApiError(
+          sdk.refresh(session.refreshKey),
+          401,
+          "REFRESH_INVALID"
+        );
+      }
+    }
+  });
+
   it("uses the sixth login argument with a Tenant key and preserves sessions after key deletion", async () => {
     const tenantId = `sdk-bypass-${uniqueUsername()}`;
     const admin = new StargateNextClient(endpoint, {
