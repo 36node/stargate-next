@@ -1,6 +1,6 @@
 {
   "name": "stargate-next",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Stargate Next API service (NestJS).",
   "private": true,
   "type": "module",
