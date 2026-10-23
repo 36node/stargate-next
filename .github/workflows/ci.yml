@@ -94,7 +94,7 @@ jobs:
         run: bash scripts/resolve-image-registry.sh
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.24.0
 
@@ -162,7 +162,7 @@ jobs:
         id: registry
         run: bash scripts/resolve-image-registry.sh
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.24.0
       - name: Install Node.js
