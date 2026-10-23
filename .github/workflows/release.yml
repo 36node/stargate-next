@@ -23,6 +23,7 @@ jobs:
       stargate_next_image: ${{ steps.registry.outputs.stargate_next_image }}
       playground_image: ${{ steps.registry.outputs.playground_image }}
       db_image: ${{ steps.registry.outputs.db_image }}
+      chart_repository: ${{ steps.registry.outputs.chart_repository }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,6 +142,44 @@ jobs:
           STARGATE_NEXT_TAGS: ${{ steps.image-plan.outputs.stargate_next_tags }}
           PLAYGROUND_TAGS: ${{ steps.image-plan.outputs.playground_tags }}
           DB_TAGS: ${{ steps.image-plan.outputs.db_tags }}
+
+      - name: Set up Helm
+        if: needs['release-please'].outputs.stargate_next_released == 'true'
+        uses: azure/setup-helm@v5
+      - name: Prepare release Helm chart
+        if: needs['release-please'].outputs.stargate_next_released == 'true'
+        uses: mikefarah/yq@v4
+        env:
+          RELEASE_TAG: ${{ needs['release-please'].outputs.stargate_next_tag }}
+        with:
+          cmd: |
+            set -eu
+            export CHART_VERSION="${RELEASE_TAG#stargate-next-v}"
+            yq -e '.["apps/stargate-next"] == strenv(CHART_VERSION)' .release-please-manifest.json
+            cp -R deploy/helm-chart .release-helm-chart
+            yq -i '.version = strenv(CHART_VERSION) | .appVersion = strenv(CHART_VERSION)' .release-helm-chart/Chart.yaml
+            yq -i '
+              load(".release-please-manifest.json") as $versions |
+              .stargateNext.image.tag = $versions["apps/stargate-next"] |
+              .playground.image.tag = $versions["apps/playground"] |
+              .db.migration.image.tag = $versions["packages/db"] |
+              .stargateNext.image.digest = "" |
+              .playground.image.digest = "" |
+              .db.migration.image.digest = ""
+            ' .release-helm-chart/values.yaml
+      - name: Package and push release Helm chart
+        if: needs['release-please'].outputs.stargate_next_released == 'true'
+        env:
+          RELEASE_TAG: ${{ needs['release-please'].outputs.stargate_next_tag }}
+          CHART_REPOSITORY: ${{ needs['registry-config'].outputs.chart_repository }}
+        run: |
+          set -euo pipefail
+          chart_version="${RELEASE_TAG#stargate-next-v}"
+          destination="$RUNNER_TEMP/helm-chart"
+          mkdir -p "$destination"
+          helm lint .release-helm-chart
+          helm package .release-helm-chart --destination "$destination"
+          helm push "$destination/stargate-chart-${chart_version}.tgz" "$CHART_REPOSITORY"
 
   npm:
     needs: release-please

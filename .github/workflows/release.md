@@ -8,6 +8,20 @@ Release Please 会独立管理 `apps/stargate-next`、`apps/playground`、`packa
 
 SDK release 会将公开 ESM 包 `@36node/stargate-next-sdk` 发布到 npmjs。SDK 首个版本为 `1.2.0`，后续版本由 Conventional Commits 和 Release Please 管理。
 
+### Helm Chart 发布
+
+Stargate Next 发版且 Docker 镜像推送成功后，同一 job 会发布 `oci://harbor.36node.com/stargate/stargate-chart`。Chart 的 `version` 和 `appVersion` 跟随 Stargate Next 版本；三个组件的默认镜像 tag 分别取当前提交 `.release-please-manifest.json` 中各自的正式版本。仅 Playground、DB 或 SDK 发版时不发布 Chart。
+
+例如发布 `stargate-next-v2.2.0` 后，可安装或升级对应 Chart：
+
+```sh
+helm registry login harbor.36node.com
+helm upgrade --install stargate-next oci://harbor.36node.com/stargate/stargate-chart \
+  --version 2.2.0 --namespace stargate --create-namespace --values values.production.yaml
+```
+
+`values.production.yaml` 中的连接、密钥及其他配置见 [Chart 使用说明](../../deploy/helm-chart/README.md)。现有 PR/main Chart 发布与 Preview/UAT 部署保持不变，不自动补发历史版本。
+
 ### PR Alpha 发布
 
 每个目标分支 PR 在创建、重新打开或推送新 commit 时，`SDK Alpha Build` 都会运行，并在类型检查、测试和包校验通过后生成版本，不检测 SDK 或 OpenAPI 文件是否发生变化：
