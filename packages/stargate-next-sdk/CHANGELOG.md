@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v2.0.0...stargate-next-sdk-v2.1.0) (2026-10-23)
+
+
+### Features
+
+* allow tenant API keys to authorize login captcha exemption ([4b6b259](https://github.com/36node/stargate-next/commit/4b6b259e4da5b3d8221c385c43da13a2e402629b))
+
 ## [2.0.0](https://github.com/36node/stargate-next/compare/stargate-next-sdk-v1.2.1...stargate-next-sdk-v2.0.0) (2026-09-10)
 
 
